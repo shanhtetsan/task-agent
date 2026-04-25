@@ -25,7 +25,7 @@ export function classifyIntent(text) {
   }
 
   // 3. Planning
-  if (/\b(prepare\s+for|plan\s+my|help\s+me\s+study\s+for|build\s+(a\s+)?study\s+plan|make\s+(a\s+)?plan|get\s+ready\s+for|how\s+should\s+i\s+study)\b/i.test(t)) {
+  if (/\b(prepare\s+for|plan\s+my|help\s+me\s+study\s+for|build\s+(a\s+)?study\s+plan|make\s+(a\s+)?plan|get\s+ready\s+for|how\s+should\s+i\s+study|\d+\s*-\s*day\s+plan|\d+\s+day\s+plan|week\s+plan|weekly\s+plan|next\s+week\s+plan)\b/i.test(t)) {
     return 'planning'
   }
 
@@ -269,6 +269,29 @@ function inferScheduleQueryKind(userText, conversationHistory) {
   return 'today'
 }
 
+function extractDayCountForPlan(text) {
+  const t = (text || '').toLowerCase()
+  const m = t.match(/\b(\d{1,2})\s*-\s*day\b|\b(\d{1,2})\s+day\b/)
+  const raw = m ? Number(m[1] || m[2]) : null
+  if (raw && raw >= 2 && raw <= 14) return raw
+  if (/\b(week|weekly|next\s+week)\b/.test(t)) return 5
+  return 3
+}
+
+function extractPlanTime(text) {
+  const t = (text || '').toLowerCase()
+  if (/\bnoon\b/.test(t)) return '12:00'
+  if (/\bmidnight\b/.test(t)) return '00:00'
+  const m = t.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/)
+  if (!m) return null
+  let h = Number(m[1])
+  const min = m[2] ? Number(m[2]) : 0
+  const ap = m[3]
+  if (ap === 'pm' && h !== 12) h += 12
+  if (ap === 'am' && h === 12) h = 0
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+}
+
 export function generateResponse(intent, text, tasks, conversationHistory) {
   const latestTask = (tasks || []).length ? tasks[tasks.length - 1] : null
   switch (intent) {
@@ -328,6 +351,8 @@ export function generateResponse(intent, text, tasks, conversationHistory) {
 
     case 'planning': {
       const today = getTodayISO()
+      const dayCount = extractDayCountForPlan(text)
+      const parsedTime = extractPlanTime(text)
       const courseMatch = text.match(/\b([A-Z]{2,4}\s?\d{3}[A-Z]?)\b/i)
       let courseName = courseMatch ? courseMatch[0].toUpperCase() : null
       if (!courseName) {
@@ -335,34 +360,39 @@ export function generateResponse(intent, text, tasks, conversationHistory) {
           if (text.toLowerCase().includes(c.toLowerCase())) { courseName = c; break }
         }
       }
-      const label = courseName || 'your exam'
-      const studyTasks = [
-        {
-          id: crypto.randomUUID(), name: `Review notes — ${label}`, category: 'coursework',
-          type: 'Study', course: courseName, date: today,
-          time: null, location: null, link: null, notes: null,
-          completed: false, completedAt: null, source: 'agent',
-        },
-        {
-          id: crypto.randomUUID(), name: `Practice problems — ${label}`, category: 'coursework',
-          type: 'Study', course: courseName, date: addDays(today, 1),
-          time: null, location: null, link: null, notes: null,
-          completed: false, completedAt: null, source: 'agent',
-        },
-        {
-          id: crypto.randomUUID(), name: `Light review + rest — ${label}`, category: 'coursework',
-          type: 'Study', course: courseName, date: addDays(today, 2),
-          time: null, location: null, link: null, notes: null,
-          completed: false, completedAt: null, source: 'agent',
-        },
-      ]
+      const label = courseName || 'your topic'
+      const startDate = parseRelativeDate(text) || today
+      const stageNames = ['Review fundamentals', 'Practice key problems', 'Mixed drills + recap', 'Timed practice', 'Light review + confidence pass']
+      const studyTasks = Array.from({ length: dayCount }, (_, i) => {
+        const phase = stageNames[i] || `Study session ${i + 1}`
+        return {
+          id: crypto.randomUUID(),
+          name: `${phase} — ${label}`,
+          category: 'coursework',
+          type: 'Study',
+          course: courseName,
+          date: addDays(startDate, i),
+          time: parsedTime,
+          location: null,
+          link: null,
+          notes: null,
+          completed: false,
+          completedAt: null,
+          source: 'agent',
+        }
+      })
+      const previewLines = studyTasks
+        .slice(0, Math.min(4, studyTasks.length))
+        .map((t, i) => `• **Day ${i + 1} (${formatDate(t.date, t.time)})** — ${t.name}`)
+        .join('\n')
+      const startLabel = formatDate(startDate, parsedTime)
       return {
-        text: `Here's a 3-day plan for ${label}:\n\n• **Today** — Review your notes, flag anything unclear\n• **Tomorrow** — Practice problems, timed\n• **Day 3** — Light review, rest up`,
+        text: `Here's a ${dayCount}-day plan for ${label}, starting **${startLabel}**:\n\n${previewLines}${dayCount > 4 ? `\n• ...and ${dayCount - 4} more day${dayCount - 4 > 1 ? 's' : ''}` : ''}`,
         action: {
           type: 'add-tasks',
-          title: 'Suggested study plan',
-          body: `Add these 3 study sessions for ${label}?`,
-          btn: 'Add all 3 as tasks',
+          title: `Suggested ${dayCount}-day plan`,
+          body: `Add these ${dayCount} study sessions for ${label}, starting ${startLabel}?`,
+          btn: `Add all ${dayCount} as tasks`,
           tasks: studyTasks,
         },
       }

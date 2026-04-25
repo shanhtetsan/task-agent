@@ -203,12 +203,9 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
             fontWeight: 500,
             color: 'var(--text)',
             textDecoration: completed ? 'line-through' : 'none',
-            lineHeight: 1.25,
-            display: '-webkit-box',
-            WebkitBoxOrient: 'vertical',
-            WebkitLineClamp: 2,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
+            lineHeight: 1.3,
+            whiteSpace: 'normal',
+            wordBreak: 'break-word',
           }}
         >
           {name}

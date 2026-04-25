@@ -20,6 +20,40 @@ function isGoodTitle(title) {
   return true
 }
 
+function enforceDeepLinkHonesty(text) {
+  if (!text || typeof text !== 'string') return text
+  let t = text
+
+  // Calendar completion claims -> prepared-link wording
+  t = t.replace(
+    /\b(i('|’)ve|i have)\s+(added|scheduled|put)\b([^.\n]*\b(calendar|google calendar)\b[^.\n]*)/gi,
+    "I've prepared the Google Calendar event$4"
+  )
+  t = t.replace(
+    /\b(added|scheduled)\s+to\s+(your\s+)?(google\s+)?calendar\b/gi,
+    'prepared for Google Calendar (click Open Google Calendar to save)'
+  )
+  t = t.replace(
+    /\b(i('|’)ve|i have)\s+scheduled\s+it\b/gi,
+    "I've prepared the calendar event"
+  )
+
+  // Email completion claims -> draft wording
+  t = t.replace(/\bemail sent\b/gi, 'email draft ready')
+  t = t.replace(/\b(i('|’)ve|i have)\s+sent(\s+a)?\s+confirmation\b/gi, "I've drafted the confirmation")
+  t = t.replace(/\b(i('|’)ve|i have)\s+sent\b([^.\n]*\b(email|gmail)\b[^.\n]*)/gi, "I've drafted$4")
+
+  // Ensure CTA for external actions stays explicit.
+  if (/\b(calendar|google calendar)\b/i.test(t) && !/open google calendar/i.test(t)) {
+    t = `${t}\n\nClick Open Google Calendar to save it.`
+  }
+  if (/\b(email|gmail)\b/i.test(t) && /\bdraft\b/i.test(t) && !/open gmail/i.test(t)) {
+    t = `${t}\n\nClick Open Gmail to review and send.`
+  }
+
+  return t
+}
+
 export default function AgentPanel({
   mode,
   onModeChange,
@@ -366,7 +400,7 @@ export default function AgentPanel({
             tasks,
           })
           if (llm) {
-            respText = llm
+            respText = enforceDeepLinkHonesty(llm)
             setLlmStatus('ready')
           } else {
             setLlmStatus('error')
@@ -537,6 +571,7 @@ export default function AgentPanel({
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
+        overflowX: 'hidden',
       }}
     >
       <div style={{ padding: 12, borderBottom: '1px solid var(--line)' }}>
@@ -599,6 +634,9 @@ export default function AgentPanel({
                   borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
                   background: active ? 'rgba(94,135,245,0.10)' : 'transparent',
                   padding: 8,
+                  overflow: 'hidden',
+                  maxWidth: '100%',
+                  boxSizing: 'border-box',
                 }}
                 onMouseEnter={e => {
                   if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.02)'
@@ -649,9 +687,13 @@ export default function AgentPanel({
                     style={{
                       width: '100%',
                       textAlign: 'left',
-                      display: 'grid',
+                      display: 'flex',
+                      flexDirection: 'column',
                       gap: 3,
                       cursor: 'pointer',
+                      minWidth: 0,
+                      maxWidth: '100%',
+                      overflow: 'hidden',
                     }}
                     onClick={() => {
                       onSetActiveConversation?.(conv.id)
@@ -667,6 +709,8 @@ export default function AgentPanel({
                           color: 'var(--text)',
                           fontWeight: 500,
                           flex: 1,
+                          minWidth: 0,
+                          maxWidth: '100%',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -696,11 +740,16 @@ export default function AgentPanel({
                     </div>
                     <div
                       style={{
+                        display: 'block',
+                        width: '100%',
+                        minWidth: 0,
+                        maxWidth: '100%',
                         fontSize: 11,
                         color: 'var(--dim)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
+                        lineHeight: 1.35,
                       }}
                     >
                       {preview}
