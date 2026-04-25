@@ -74,6 +74,7 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
   const { category, type, name, date, time, course, location, link, email, completed } = task
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.personal
   const isZoom = /zoom/i.test(location || '') || /zoom/i.test(link || '')
+  const zoomHref = isZoom ? (link || 'https://zoom.us/') : null
   const showJoin = hovered && isZoom && !!link && isNextThirtyMinutes(task)
   const calendarLink = date ? buildCalendarLink(task) : null
   const gmailLink = useMemo(() => {
@@ -93,13 +94,13 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
             </span>
           ) : null}
           {location ? (
-            isZoom && link ? (
+            zoomHref ? (
               <a
-                href={link}
+                href={zoomHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: '#9ec4ff', display: 'inline-flex', alignItems: 'center' }}
-                title="Open Zoom link"
+                title={link ? 'Open Zoom link' : 'Open Zoom'}
                 onClick={e => e.stopPropagation()}
               >
                 <Video size={12} />

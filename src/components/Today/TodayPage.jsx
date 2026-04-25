@@ -1,7 +1,9 @@
 import { computeGroup, formatDate } from '../../utils/dateUtils'
 import Logo from '../Logo'
+import { useNavigate } from 'react-router-dom'
 
 export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
+  const navigate = useNavigate()
   const todayTasks = tasks.filter(t => computeGroup(t.date) === 'today')
   const focusTask = todayTasks.find(t => !t.completed)
   const alsoToday = todayTasks.filter(t => t !== focusTask)
@@ -137,6 +139,7 @@ export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
       {focusTask && (
         <Section label="Focus">
           <div
+            onClick={() => navigate('/tasks')}
             style={{
               background: 'var(--surface)',
               borderLeft: '3px solid var(--accent)',
@@ -148,7 +151,11 @@ export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
               display: 'flex',
               flexDirection: 'column',
               gap: 10,
+              cursor: 'pointer',
+              transition: 'background 0.15s ease',
             }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface)' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span
@@ -219,7 +226,7 @@ export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
             }}
           >
             {alsoToday.map((task, i) => (
-              <SimpleRow key={task.id} task={task} isLast={i === alsoToday.length - 1} />
+              <SimpleRow key={task.id} task={task} isLast={i === alsoToday.length - 1} onClick={() => navigate('/tasks')} />
             ))}
           </div>
         </Section>
@@ -237,7 +244,7 @@ export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
             }}
           >
             {weekendTasks.map((task, i) => (
-              <SimpleRow key={task.id} task={task} isLast={i === weekendTasks.length - 1} />
+              <SimpleRow key={task.id} task={task} isLast={i === weekendTasks.length - 1} onClick={() => navigate('/tasks')} />
             ))}
           </div>
         </Section>
@@ -267,9 +274,10 @@ function Section({ label, children }) {
   )
 }
 
-function SimpleRow({ task, isLast }) {
+function SimpleRow({ task, isLast, onClick }) {
   return (
     <div
+      onClick={onClick}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -277,7 +285,11 @@ function SimpleRow({ task, isLast }) {
         padding: '12px 18px',
         borderBottom: isLast ? 'none' : '1px solid var(--line)',
         gap: 16,
+        cursor: 'pointer',
+        transition: 'background 0.15s ease',
       }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div
