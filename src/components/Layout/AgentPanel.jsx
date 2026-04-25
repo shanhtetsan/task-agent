@@ -228,8 +228,6 @@ export default function AgentPanel({
     return buildGmailLink({ to: task.email, subject, body })
   }
 
-  const ZOOM_LINK_FOLLOWUP_TEXT = 'Want to save the Zoom link too? Paste the Zoom URL.'
-
   function buildGmailDraftAssistantMessage(withEmail) {
     return {
       role: 'assistant',
@@ -244,15 +242,11 @@ export default function AgentPanel({
     }
   }
 
-  /** Gmail draft, then auto Zoom ask in the same turn if we still need a link (no extra user message). */
+  /** After Gmail draft: clear pending if nothing else is needed (date/email follow-ups). */
   function afterEmailSavedAppendMessages(p, withEmail) {
     p.pendingUserBeatAfterEmail = false
     const out = [buildGmailDraftAssistantMessage(withEmail)]
-    if (p.zoom) {
-      p.zoomPromptSent = true
-      out.push({ role: 'assistant', text: ZOOM_LINK_FOLLOWUP_TEXT })
-    }
-    if (!p.date && !p.email && !p.zoom) pendingFollowUpsRef.current = null
+    if (!p.date && !p.email) pendingFollowUpsRef.current = null
     return out
   }
 
@@ -295,26 +289,21 @@ export default function AgentPanel({
     }
     const wantsDate = !task.date
     const wantsEmail = task.category === 'event' && !task.email
-    const wantsZoom =
-      task.category === 'event' && /\bzoom\b/i.test(task.location || '') && !task.link
-    if (!wantsDate && !wantsEmail && !wantsZoom) {
+    if (!wantsDate && !wantsEmail) {
       pendingFollowUpsRef.current = null
       return
     }
     pendingFollowUpsRef.current = {
-      // date, email, zoom: still needed for the linked task
       date: wantsDate,
       email: wantsEmail,
-      zoom: wantsZoom,
       calendarOffered: false,
       pendingUserBeatAfterCalendar: false,
       pendingUserBeatAfterEmail: false,
       emailPromptSent: false,
-      zoomPromptSent: false,
     }
   }
 
-  /** One follow-up at a time on confirm. After calendar or Gmail, Zoom is asked in the same turn as the draft (no extra keystroke). */
+  /** One follow-up at a time on confirm (date → calendar, then optional email). */
   function pushNextFollowUpForLinkedTask() {
     const t = resolveAgentFollowUpTask()
     const p = pendingFollowUpsRef.current
@@ -337,17 +326,12 @@ export default function AgentPanel({
         href: buildCalendarLink(task),
       })
       p.calendarOffered = true
-      p.pendingUserBeatAfterCalendar = !!(p.email && !task.email) || !!p.zoom
+      p.pendingUserBeatAfterCalendar = !!(p.email && !task.email)
       return
     }
     if (p.email && !task.email && !p.emailPromptSent && !p.pendingUserBeatAfterCalendar) {
       pushAssistantAction("Email a confirmation? What's the recipient's email?")
       p.emailPromptSent = true
-      return
-    }
-    if (p.zoom && !task.link && !p.zoomPromptSent && !p.pendingUserBeatAfterCalendar) {
-      pushAssistantAction('Want to save the Zoom link too? Paste the Zoom URL.')
-      p.zoomPromptSent = true
     }
   }
 
@@ -423,28 +407,6 @@ export default function AgentPanel({
               }])
               return
             }
-            if (!p.email && p.zoom) {
-              if (providedUrl && isZoomUrl(providedUrl)) {
-                onUpdateTask?.(id, { link: providedUrl })
-                const merged = { ...target, link: providedUrl }
-                lastAgentFollowUpTaskRef.current = merged
-                p.zoom = false
-                if (!p.date && !p.email) pendingFollowUpsRef.current = null
-                setConversation([...nextConv, {
-                  role: 'assistant',
-                  text: `Saved the Zoom link for "${merged.name}".`,
-                }])
-                return
-              }
-              if (!p.zoomPromptSent) {
-                p.zoomPromptSent = true
-                setConversation([...nextConv, {
-                  role: 'assistant',
-                  text: 'Want to save the Zoom link too? Paste the Zoom URL.',
-                }])
-                return
-              }
-            }
           }
 
           if (p.date && parsedDate) {
@@ -453,8 +415,8 @@ export default function AgentPanel({
             lastAgentFollowUpTaskRef.current = updatedTask
             p.date = false
             p.calendarOffered = true
-            p.pendingUserBeatAfterCalendar = !!p.email || !!p.zoom
-            if (!p.email && !p.zoom) pendingFollowUpsRef.current = null
+            p.pendingUserBeatAfterCalendar = !!p.email
+            if (!p.email) pendingFollowUpsRef.current = null
             setConversation([...nextConv, {
               role: 'assistant',
               text: "Perfect — I updated the date. Here's the Google Calendar link:",
@@ -474,18 +436,6 @@ export default function AgentPanel({
             lastAgentFollowUpTaskRef.current = withEmail
             p.email = false
             setConversation([...nextConv, ...afterEmailSavedAppendMessages(p, withEmail)])
-            return
-          }
-          if (p.zoom && providedUrl && isZoomUrl(providedUrl)) {
-            onUpdateTask?.(id, { link: providedUrl })
-            const merged = { ...target, link: providedUrl }
-            lastAgentFollowUpTaskRef.current = merged
-            p.zoom = false
-            if (!p.date && !p.email) pendingFollowUpsRef.current = null
-            setConversation([...nextConv, {
-              role: 'assistant',
-              text: `Saved the Zoom link for "${merged.name}".`,
-            }])
             return
           }
         }
