@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './components/Layout/Sidebar'
 import AgentFab from './components/Layout/AgentFab'
 import AgentPanel from './components/Layout/AgentPanel'
@@ -43,6 +43,18 @@ function Toast({ message }) {
 }
 
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AppShell />
+      </BrowserRouter>
+    </ErrorBoundary>
+  )
+}
+
+function AppShell() {
+  const location = useLocation()
+  const navigate = useNavigate()
   function createConversation(seed = {}) {
     const now = new Date().toISOString()
     return {
@@ -106,6 +118,13 @@ export default function App() {
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentMode, setAgentMode] = useState('sidebar')
   const [toast, setToast] = useState(null)
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 900)
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 900)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   useEffect(() => {
     localStorage.setItem('planner_tasks', JSON.stringify(tasks))
@@ -273,9 +292,10 @@ export default function App() {
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)))
   }
 
+  const mobileNavHeight = 62
+
   return (
-    <ErrorBoundary>
-      <BrowserRouter>
+    <>
       <div
         style={{
           display: 'flex',
@@ -284,10 +304,12 @@ export default function App() {
           background: 'var(--bg)',
         }}
       >
-        <Sidebar
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(v => !v)}
-        />
+        {!isMobile && (
+          <Sidebar
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed(v => !v)}
+          />
+        )}
 
         <main
           style={{
@@ -296,6 +318,7 @@ export default function App() {
             display: 'flex',
             position: 'relative',
             background: 'linear-gradient(180deg, #1f1f1f 0%, var(--bg) 60%)',
+            paddingBottom: isMobile ? mobileNavHeight + 14 : 0,
           }}
         >
           <Routes>
@@ -359,6 +382,53 @@ export default function App() {
         {!agentOpen && (
           <AgentFab onToggle={() => setAgentOpen(o => !o)} />
         )}
+
+        {isMobile && (
+          <nav
+            style={{
+              position: 'fixed',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: mobileNavHeight,
+              background: 'rgba(20,20,20,0.95)',
+              borderTop: '1px solid var(--line)',
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              zIndex: 45,
+              backdropFilter: 'blur(6px)',
+            }}
+          >
+            <button
+              onClick={() => navigate('/')}
+              style={{
+                border: 'none',
+                background: location.pathname === '/' ? 'rgba(255,255,255,0.06)' : 'transparent',
+                color: location.pathname === '/' ? 'var(--text)' : 'var(--dim)',
+                fontFamily: 'Inter, sans-serif',
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              Today
+            </button>
+            <button
+              onClick={() => navigate('/tasks')}
+              style={{
+                border: 'none',
+                background: location.pathname === '/tasks' ? 'rgba(255,255,255,0.06)' : 'transparent',
+                color: location.pathname === '/tasks' ? 'var(--text)' : 'var(--dim)',
+                fontFamily: 'Inter, sans-serif',
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              Tasks
+            </button>
+          </nav>
+        )}
       </div>
 
       <TaskModal
@@ -374,7 +444,6 @@ export default function App() {
       />
 
       <Toast message={toast} />
-      </BrowserRouter>
-    </ErrorBoundary>
+    </>
   )
 }

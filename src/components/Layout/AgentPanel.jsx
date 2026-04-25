@@ -84,6 +84,7 @@ export default function AgentPanel({
   const [historyOpen, setHistoryOpen] = useState(false)
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const [hoveredConversationId, setHoveredConversationId] = useState(null)
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 900)
   /** Task just added/confirmed in chat — used so follow-up replies attach to the right task (not a heuristic "latest" row). */
   const lastAgentFollowUpTaskIdRef = useRef(null)
   const lastAgentFollowUpTaskRef = useRef(null)
@@ -99,6 +100,12 @@ export default function AgentPanel({
   useEffect(() => {
     if (mode === 'fullscreen') setHistoryOpen(false)
   }, [mode])
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 900)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -684,7 +691,7 @@ export default function AgentPanel({
     setConversation(updated)
   }
 
-  const isSidebar = mode === 'sidebar'
+  const isSidebar = mode === 'sidebar' && !isMobile
   const isEmpty = conversation.length === 0
   const llmStatusLabel =
     llmStatus === 'loading'
@@ -991,14 +998,14 @@ export default function AgentPanel({
 
       <div style={panelStyle}>
         <div style={innerStyle}>
-          {!isSidebar && historyPane(260)}
+          {!isSidebar && !isMobile && historyPane(260)}
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', position: 'relative' }}>
           {/* Header */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              padding: '16px 18px',
+              padding: isMobile ? '12px' : '16px 18px',
               borderBottom: '1px solid var(--line)',
               gap: 10,
               flexShrink: 0,
@@ -1072,44 +1079,46 @@ export default function AgentPanel({
             </div>
 
             {/* Mode toggle */}
-            <div
-              style={{
-                display: 'flex',
-                background: 'var(--surface-2)',
-                border: '1px solid var(--line)',
-                borderRadius: 7,
-                padding: 2,
-                gap: 1,
-                marginRight: 4,
-              }}
-            >
-              {['sidebar', 'fullscreen'].map(m => (
-                <button
-                  key={m}
-                  onClick={() => onModeChange(m)}
-                  style={{
-                    background: mode === m ? 'var(--surface)' : 'transparent',
-                    border: mode === m ? '1px solid var(--line-2)' : '1px solid transparent',
-                    borderRadius: 5,
-                    padding: '4px 10px',
-                    fontSize: 11,
-                    color: mode === m ? 'var(--text)' : 'var(--dim)',
-                    cursor: 'pointer',
-                    fontFamily: 'Inter, sans-serif',
-                    fontWeight: 450,
-                    transition: 'all 0.15s',
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                >
-                  {m === 'sidebar' ? (
-                    <Minimize2 size={12} strokeWidth={1.8} />
-                  ) : (
-                    <Maximize2 size={12} strokeWidth={1.8} />
-                  )}
-                </button>
-              ))}
-            </div>
+            {!isMobile && (
+              <div
+                style={{
+                  display: 'flex',
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 7,
+                  padding: 2,
+                  gap: 1,
+                  marginRight: 4,
+                }}
+              >
+                {['sidebar', 'fullscreen'].map(m => (
+                  <button
+                    key={m}
+                    onClick={() => onModeChange(m)}
+                    style={{
+                      background: mode === m ? 'var(--surface)' : 'transparent',
+                      border: mode === m ? '1px solid var(--line-2)' : '1px solid transparent',
+                      borderRadius: 5,
+                      padding: '4px 10px',
+                      fontSize: 11,
+                      color: mode === m ? 'var(--text)' : 'var(--dim)',
+                      cursor: 'pointer',
+                      fontFamily: 'Inter, sans-serif',
+                      fontWeight: 450,
+                      transition: 'all 0.15s',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {m === 'sidebar' ? (
+                      <Minimize2 size={12} strokeWidth={1.8} />
+                    ) : (
+                      <Maximize2 size={12} strokeWidth={1.8} />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <button
               onClick={onClose}
@@ -1164,7 +1173,7 @@ export default function AgentPanel({
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '0 24px 40px',
+                padding: isMobile ? '0 14px 18px' : '0 24px 40px',
                 gap: 14,
                 textAlign: 'center',
               }}
@@ -1185,7 +1194,7 @@ export default function AgentPanel({
               <div
                 style={{
                   fontFamily: 'Fraunces, serif',
-                  fontSize: 20,
+                  fontSize: isMobile ? 18 : 20,
                   fontWeight: 500,
                   color: 'var(--text)',
                   letterSpacing: '-0.3px',
@@ -1199,7 +1208,7 @@ export default function AgentPanel({
                   color: 'var(--dim)',
                   fontFamily: 'Inter, sans-serif',
                   lineHeight: 1.6,
-                  maxWidth: 280,
+                  maxWidth: isMobile ? 320 : 280,
                 }}
               >
                 I can help you study or add tasks to your schedule. I can also sync tasks to Google Calendar or draft emails — just ask.
@@ -1241,7 +1250,7 @@ export default function AgentPanel({
               style={{
                 flex: 1,
                 overflowY: 'auto',
-                padding: '16px 0',
+                padding: isMobile ? '10px 0' : '16px 0',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 10,
@@ -1299,6 +1308,7 @@ export default function AgentPanel({
                 alignItems: 'center',
                 gap: 10,
                 padding: '8px 16px 16px',
+                paddingBottom: isMobile ? 12 : 16,
               }}
             >
               <input

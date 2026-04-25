@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react'
 import TaskGroup from './TaskGroup'
 import { computeGroup, getTodayISO } from '../../utils/dateUtils'
@@ -48,6 +48,13 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent, onToggle
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [monthDate, setMonthDate] = useState(() => startOfMonth(new Date()))
   const [selectedDate, setSelectedDate] = useState(null)
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 900)
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 900)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const dateTaskCount = useMemo(() => {
     const map = new Map()
@@ -96,9 +103,9 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent, onToggle
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '0 52px',
+          padding: isMobile ? '0 20px' : '0 52px',
           gap: 16,
-          paddingBottom: 80,
+          paddingBottom: isMobile ? 108 : 80,
         }}
       >
         <div
@@ -139,7 +146,7 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent, onToggle
             Add your first task or ask the agent to add one for you.
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+        <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap', justifyContent: 'center' }}>
           <button
             onClick={onNewTask}
             style={{
@@ -196,7 +203,9 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent, onToggle
   return (
     <div
       style={{
-        padding: 'clamp(28px, 3.6vw, 42px) clamp(20px, 4vw, 46px) clamp(34px, 5vw, 52px)',
+        padding: isMobile
+          ? '18px 12px 14px'
+          : 'clamp(28px, 3.6vw, 42px) clamp(20px, 4vw, 46px) clamp(34px, 5vw, 52px)',
         maxWidth: 1160,
         width: '100%',
         margin: '0 auto',
@@ -206,13 +215,15 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent, onToggle
       <div
         style={{
           display: 'flex',
-          alignItems: 'flex-start',
+          flexDirection: isMobile ? 'column' : 'row',
+          alignItems: isMobile ? 'stretch' : 'flex-start',
           justifyContent: 'space-between',
-          marginBottom: 30,
+          gap: isMobile ? 14 : 0,
+          marginBottom: isMobile ? 16 : 30,
           background: 'var(--surface)',
           border: '1px solid var(--line)',
           borderRadius: 14,
-          padding: '18px 20px',
+          padding: isMobile ? '14px 12px' : '18px 20px',
         }}
       >
         <div>
@@ -231,7 +242,7 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent, onToggle
           <h1
             style={{
               fontFamily: 'Inter, sans-serif',
-              fontSize: 31,
+              fontSize: isMobile ? 25 : 31,
               fontWeight: 650,
               color: 'var(--text)',
               letterSpacing: '-0.5px',
@@ -243,7 +254,7 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent, onToggle
         </div>
 
         {/* View controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 2 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 2, flexWrap: 'wrap' }}>
           <div
             style={{
               display: 'flex',
@@ -298,7 +309,7 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent, onToggle
       </div>
 
       {/* Filters + content */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 290px', gap: 20, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0,1fr)' : 'minmax(0,1fr) 290px', gap: 20, alignItems: 'start' }}>
         <div>
           <div
             style={{
@@ -408,8 +419,9 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent, onToggle
             border: '1px solid var(--line)',
             borderRadius: 12,
             padding: '12px 12px 14px',
-            position: 'sticky',
+            position: isMobile ? 'static' : 'sticky',
             top: 18,
+            order: isMobile ? -1 : 0,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
