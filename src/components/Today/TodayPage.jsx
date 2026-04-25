@@ -1,7 +1,7 @@
-import { Sparkles } from 'lucide-react'
 import { computeGroup, formatDate } from '../../utils/dateUtils'
+import Logo from '../Logo'
 
-export default function TodayPage({ tasks = [], onNewTask }) {
+export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
   const todayTasks = tasks.filter(t => computeGroup(t.date) === 'today')
   const focusTask = todayTasks.find(t => !t.completed)
   const alsoToday = todayTasks.filter(t => t !== focusTask)
@@ -27,14 +27,14 @@ export default function TodayPage({ tasks = [], onNewTask }) {
             width: 48,
             height: 48,
             borderRadius: 14,
-            background: 'rgba(139,135,255,0.12)',
-            border: '1px solid rgba(139,135,255,0.2)',
+            background: 'var(--accent-soft)',
+            border: '1px solid rgba(94,135,245,0.28)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}
         >
-          <Sparkles size={22} color="var(--accent)" strokeWidth={1.8} />
+          <Logo variant="large" size={48} />
         </div>
         <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div
@@ -63,7 +63,7 @@ export default function TodayPage({ tasks = [], onNewTask }) {
           onClick={onNewTask}
           style={{
             background: 'var(--accent)',
-            color: '#0e0e1a',
+            color: '#ffffff',
             border: 'none',
             borderRadius: 8,
             padding: '9px 22px',
@@ -79,12 +79,29 @@ export default function TodayPage({ tasks = [], onNewTask }) {
         >
           New task
         </button>
+        <button
+          onClick={onOpenAgent}
+          style={{
+            background: 'transparent',
+            color: 'var(--dim)',
+            border: '1px solid var(--line-2)',
+            borderRadius: 8,
+            padding: '9px 18px',
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: 'pointer',
+            fontFamily: 'Inter, sans-serif',
+            marginTop: 2,
+          }}
+        >
+          Ask Task Copilot to plan
+        </button>
       </div>
     )
   }
 
   return (
-    <div style={{ padding: '48px 52px', maxWidth: 820, width: '100%' }}>
+    <div style={{ padding: 'clamp(28px, 4vw, 48px) clamp(20px, 4.6vw, 52px)', maxWidth: 860, width: '100%', margin: '0 auto' }}>
       {/* Eyebrow */}
       <div
         style={{
@@ -139,8 +156,8 @@ export default function TodayPage({ tasks = [], onNewTask }) {
                   fontFamily: '"JetBrains Mono", monospace',
                   fontSize: 10.5,
                   color: 'var(--accent)',
-                  background: 'rgba(139,135,255,0.12)',
-                  border: '1px solid rgba(139,135,255,0.25)',
+                  background: 'var(--accent-soft)',
+                  border: '1px solid rgba(94,135,245,0.28)',
                   borderRadius: 5,
                   padding: '2px 8px',
                   letterSpacing: '0.3px',

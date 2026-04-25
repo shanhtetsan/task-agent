@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Video } from 'lucide-react'
 import { formatDate } from '../../utils/dateUtils'
 
-const CATEGORY_LABEL = { academic: 'ACADEMIC', meeting: 'MEETING', study: 'STUDY', personal: 'OTHER' }
+const CATEGORY_LABEL = { coursework: 'COURSEWORK', event: 'EVENT', personal: 'PERSONAL' }
 
 export default function PreviewCard({ preview, onAdd, onEdit, onCancel }) {
   const [added, setAdded] = useState(preview?.added ?? false)
@@ -21,10 +21,10 @@ export default function PreviewCard({ preview, onAdd, onEdit, onCancel }) {
     <div
       style={{
         marginTop: 10,
-        border: '1px solid var(--accent)',
+        border: '1px solid rgba(94,135,245,0.7)',
         borderRadius: 10,
         padding: '14px 16px',
-        background: 'rgba(139,135,255,0.05)',
+        background: 'var(--accent-soft)',
         display: 'flex',
         flexDirection: 'column',
         gap: 10,

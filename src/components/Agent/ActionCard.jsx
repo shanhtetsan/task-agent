@@ -4,6 +4,10 @@ export default function ActionCard({ action, onAdd }) {
   const [added, setAdded] = useState(action.added || false)
 
   function handleAdd() {
+    if (action.href) {
+      window.open(action.href, '_blank', 'noopener,noreferrer')
+      return
+    }
     setAdded(true)
     onAdd?.()
   }
@@ -11,8 +15,8 @@ export default function ActionCard({ action, onAdd }) {
   return (
     <div
       style={{
-        border: '1px solid var(--accent)',
-        background: 'rgba(139,135,255,0.05)',
+        border: '1px solid rgba(94,135,245,0.7)',
+        background: 'var(--accent-soft)',
         borderRadius: 10,
         padding: '12px 14px',
         marginTop: 10,
@@ -37,25 +41,25 @@ export default function ActionCard({ action, onAdd }) {
         {action.body}
       </div>
       <button
-        disabled={added}
+        disabled={action.href ? false : added}
         onClick={handleAdd}
         style={{
           alignSelf: 'flex-start',
-          background: added ? 'rgba(109,214,156,0.15)' : 'var(--accent)',
-          color: added ? 'var(--good)' : '#0e0e1a',
-          border: added ? '1px solid rgba(109,214,156,0.4)' : 'none',
+          background: added && !action.href ? 'rgba(109,214,156,0.15)' : 'var(--accent)',
+          color: added && !action.href ? 'var(--good)' : '#0e0e1a',
+          border: added && !action.href ? '1px solid rgba(109,214,156,0.4)' : 'none',
           borderRadius: 7,
           padding: '6px 14px',
           fontSize: 12.5,
           fontWeight: 600,
-          cursor: added ? 'default' : 'pointer',
+          cursor: added && !action.href ? 'default' : 'pointer',
           fontFamily: 'Inter, sans-serif',
           transition: 'all 0.2s',
         }}
-        onMouseEnter={e => { if (!added) e.currentTarget.style.opacity = '0.85' }}
-        onMouseLeave={e => { if (!added) e.currentTarget.style.opacity = '1' }}
+        onMouseEnter={e => { if (!added || action.href) e.currentTarget.style.opacity = '0.85' }}
+        onMouseLeave={e => { if (!added || action.href) e.currentTarget.style.opacity = '1' }}
       >
-        {added ? 'Added ✓' : action.btn}
+        {added && !action.href ? 'Added ✓' : action.btn}
       </button>
     </div>
   )

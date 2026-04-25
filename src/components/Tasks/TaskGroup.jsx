@@ -1,42 +1,40 @@
 import TaskRow from './TaskRow'
 
-export default function TaskGroup({ label, tasks }) {
+export default function TaskGroup({ label, tasks, onToggleTask, onEditTask, onDeleteTask }) {
   return (
-    <div style={{ marginBottom: 32 }}>
+    <div style={{ marginBottom: 20 }}>
       {/* Group header */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          padding: '0 20px 10px',
+          justifyContent: 'space-between',
+          padding: '0 2px 8px',
+          borderBottom: '1px solid var(--line)',
+          marginBottom: 8,
         }}
       >
         <span
           style={{
-            fontFamily: '"JetBrains Mono", monospace',
-            fontSize: 10,
-            fontWeight: 500,
+            fontFamily: 'Inter, sans-serif',
+            fontSize: 11,
+            fontWeight: 600,
             color: 'var(--faint)',
+            letterSpacing: '0.1em',
             textTransform: 'uppercase',
-            letterSpacing: '0.8px',
           }}
         >
           {label}
         </span>
         <span
           style={{
-            background: 'rgba(139,135,255,0.15)',
-            color: 'var(--accent)',
-            borderRadius: 999,
+            color: 'var(--faint)',
             fontFamily: '"JetBrains Mono", monospace',
-            fontSize: 10,
-            fontWeight: 500,
-            padding: '1px 7px',
-            letterSpacing: '0.3px',
+            fontSize: 11,
+            letterSpacing: '0.02em',
           }}
         >
-          {tasks.length}
+          {tasks.length} {tasks.length === 1 ? 'item' : 'items'}
         </span>
       </div>
 
@@ -45,12 +43,18 @@ export default function TaskGroup({ label, tasks }) {
         style={{
           background: 'var(--surface)',
           border: '1px solid var(--line)',
-          borderRadius: 10,
+          borderRadius: 12,
           overflow: 'hidden',
         }}
       >
         {tasks.map(task => (
-          <TaskRow key={task.id} task={task} />
+          <TaskRow
+            key={task.id}
+            task={task}
+            onToggleTask={onToggleTask}
+            onEditTask={onEditTask}
+            onDeleteTask={onDeleteTask}
+          />
         ))}
       </div>
     </div>

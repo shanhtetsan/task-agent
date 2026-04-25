@@ -6,6 +6,7 @@ import AgentPanel from './components/Layout/AgentPanel'
 import TodayPage from './components/Today/TodayPage'
 import TasksPage from './components/Tasks/TasksPage'
 import TaskModal from './components/Tasks/TaskModal'
+import ErrorBoundary from './components/ErrorBoundary'
 import { migrateTasks } from './utils/migrationUtils'
 
 function Toast({ message }) {
@@ -42,6 +43,17 @@ function Toast({ message }) {
 }
 
 export default function App() {
+  function createConversation(seed = {}) {
+    const now = new Date().toISOString()
+    return {
+      id: seed.id || crypto.randomUUID(),
+      title: seed.title || 'New chat',
+      messages: Array.isArray(seed.messages) ? seed.messages : [],
+      createdAt: seed.createdAt || now,
+      updatedAt: seed.updatedAt || now,
+    }
+  }
+
   const [tasks, setTasks] = useState(() => {
     try {
       const raw = JSON.parse(localStorage.getItem('planner_tasks') || '[]')
@@ -52,12 +64,45 @@ export default function App() {
       return migrated
     } catch { return [] }
   })
-  const [conversation, setConversation] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('planner_conversation') || '[]') }
-    catch { return [] }
+  const [conversationStore, setConversationStore] = useState(() => {
+    try {
+      const multiRaw = JSON.parse(localStorage.getItem('planner_conversations') || 'null')
+      if (multiRaw && Array.isArray(multiRaw.conversations) && multiRaw.conversations.length > 0) {
+        const normalized = multiRaw.conversations.map(c => createConversation(c))
+        const activeValid = normalized.some(c => c.id === multiRaw.activeConversationId)
+        return {
+          conversations: normalized,
+          activeConversationId: activeValid ? multiRaw.activeConversationId : normalized[0].id,
+        }
+      }
+    } catch { /* ignore */ }
+
+    try {
+      const legacy = JSON.parse(localStorage.getItem('planner_conversation') || '[]')
+      if (Array.isArray(legacy) && legacy.length > 0) {
+        const migrated = createConversation({
+          title: 'Previous chat',
+          messages: legacy,
+        })
+        return {
+          conversations: [migrated],
+          activeConversationId: migrated.id,
+        }
+      }
+    } catch { /* ignore */ }
+
+    const initial = createConversation()
+    return {
+      conversations: [initial],
+      activeConversationId: initial.id,
+    }
   })
   const [taskModalOpen, setTaskModalOpen] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
+  /** When set, saving the modal updates that chat message’s preview only (no new row) unless the task is already in the list. */
+  const [previewEditIndex, setPreviewEditIndex] = useState(null)
+  const [previewEditConversationId, setPreviewEditConversationId] = useState(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentMode, setAgentMode] = useState('sidebar')
   const [toast, setToast] = useState(null)
@@ -67,8 +112,69 @@ export default function App() {
   }, [tasks])
 
   useEffect(() => {
-    localStorage.setItem('planner_conversation', JSON.stringify(conversation))
-  }, [conversation])
+    localStorage.setItem('planner_conversations', JSON.stringify(conversationStore))
+  }, [conversationStore])
+
+  const activeConversation = conversationStore.conversations.find(c => c.id === conversationStore.activeConversationId)
+    || conversationStore.conversations[0]
+    || createConversation()
+  const activeMessages = activeConversation?.messages || []
+
+  function updateConversationById(conversationId, updater) {
+    setConversationStore(prev => ({
+      ...prev,
+      conversations: prev.conversations.map(c => (c.id === conversationId ? updater(c) : c)),
+    }))
+  }
+
+  function setActiveConversationMessages(messagesOrUpdater) {
+    setConversationStore(prev => ({
+      ...prev,
+      conversations: prev.conversations.map(c => {
+        if (c.id !== prev.activeConversationId) return c
+        const nextMessages = typeof messagesOrUpdater === 'function'
+          ? messagesOrUpdater(c.messages)
+          : messagesOrUpdater
+        return { ...c, messages: nextMessages, updatedAt: new Date().toISOString() }
+      }),
+    }))
+  }
+
+  function createNewConversation() {
+    const next = createConversation()
+    setConversationStore(prev => ({
+      conversations: [next, ...prev.conversations],
+      activeConversationId: next.id,
+    }))
+  }
+
+  function setActiveConversation(conversationId) {
+    setConversationStore(prev => ({ ...prev, activeConversationId: conversationId }))
+  }
+
+  function renameActiveConversation(nextTitle) {
+    setConversationStore(prev => ({
+      ...prev,
+      conversations: prev.conversations.map(c =>
+        c.id === prev.activeConversationId
+          ? { ...c, title: nextTitle, updatedAt: new Date().toISOString() }
+          : c
+      ),
+    }))
+  }
+
+  function deleteConversation(conversationId) {
+    setConversationStore(prev => {
+      const remaining = prev.conversations.filter(c => c.id !== conversationId)
+      if (remaining.length === 0) {
+        const fresh = createConversation()
+        return { conversations: [fresh], activeConversationId: fresh.id }
+      }
+      const sorted = [...remaining].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+      const nextActive = prev.activeConversationId === conversationId ? sorted[0].id : prev.activeConversationId
+      return { conversations: remaining, activeConversationId: nextActive }
+    })
+  }
 
   function addTasks(newTasks) {
     setTasks(prev => [
@@ -77,8 +183,10 @@ export default function App() {
     ])
   }
 
-  function handleEditTask(prefilled) {
-    setEditingTask(prefilled)
+  function handleEditTask(task, messageIndex, conversationId) {
+    setEditingTask(task)
+    setPreviewEditIndex(typeof messageIndex === 'number' ? messageIndex : null)
+    setPreviewEditConversationId(conversationId || null)
     setTaskModalOpen(true)
   }
 
@@ -88,11 +196,86 @@ export default function App() {
   }
 
   function handleNewTask(taskData) {
-    addTasks([taskData])
+    if (previewEditIndex != null && previewEditConversationId) {
+      updateConversationById(previewEditConversationId, (conversationObj) => {
+        const next = conversationObj.messages.map((m, i) => {
+          if (i !== previewEditIndex || !m.preview) return m
+          const p = m.preview
+          return { ...m, preview: { ...taskData, added: p.added } }
+        })
+        return { ...conversationObj, messages: next, updatedAt: new Date().toISOString() }
+      })
+      if (tasks.some(t => t.id === taskData.id)) {
+        setTasks(prev => prev.map(t => (t.id === taskData.id ? { ...t, ...taskData } : t)))
+      }
+    } else if (editingTask?.id && tasks.some(t => t.id === editingTask.id)) {
+      setTasks(prev => prev.map(t => (t.id === taskData.id ? { ...t, ...taskData } : t)))
+    } else {
+      addTasks([taskData])
+    }
+  }
+
+  function handleToggleTask(id) {
+    setTasks(prev =>
+      prev.map(t =>
+        t.id === id
+          ? { ...t, completed: !t.completed, completedAt: !t.completed ? new Date().toISOString() : null }
+          : t
+      )
+    )
+  }
+
+  function handleDeleteTask(id) {
+    try {
+      // Remove task from primary task list.
+      setTasks(prev => prev.filter(t => t.id !== id))
+
+      // Clear task references from edit context.
+      if (editingTask?.id === id) {
+        setEditingTask(null)
+        setPreviewEditIndex(null)
+        setPreviewEditConversationId(null)
+        setTaskModalOpen(false)
+      }
+
+      // Remove stale references from conversation messages to avoid rendering stale task objects.
+      setConversationStore(prev => ({
+        ...prev,
+        conversations: prev.conversations.map(conv => {
+          const nextMessages = (conv.messages || []).map(msg => {
+            let next = msg
+            if (msg?.preview?.id === id) {
+              next = { ...next, preview: null }
+            }
+            if (msg?.action?.tasks?.length) {
+              const remainingTasks = msg.action.tasks.filter(t => t?.id !== id)
+              next = {
+                ...next,
+                action: {
+                  ...msg.action,
+                  tasks: remainingTasks,
+                  ...(remainingTasks.length === 0 ? { added: true } : {}),
+                },
+              }
+            }
+            return next
+          })
+          return { ...conv, messages: nextMessages, updatedAt: new Date().toISOString() }
+        }),
+      }))
+    } catch (error) {
+      console.error('Delete task failed:', error)
+      showToast('Could not delete task')
+    }
+  }
+
+  function handleUpdateTask(id, patch) {
+    setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)))
   }
 
   return (
-    <BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
       <div
         style={{
           display: 'flex',
@@ -101,7 +284,10 @@ export default function App() {
           background: 'var(--bg)',
         }}
       >
-        <Sidebar />
+        <Sidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(v => !v)}
+        />
 
         <main
           style={{
@@ -109,19 +295,37 @@ export default function App() {
             overflowY: 'auto',
             display: 'flex',
             position: 'relative',
+            background: 'linear-gradient(180deg, #1f1f1f 0%, var(--bg) 60%)',
           }}
         >
           <Routes>
             <Route
               path="/"
-              element={<TodayPage tasks={tasks} onNewTask={() => setTaskModalOpen(true)} />}
+              element={
+                <TodayPage
+                  tasks={tasks}
+                  onOpenAgent={() => setAgentOpen(true)}
+                  onNewTask={() => {
+                    setEditingTask(null)
+                    setPreviewEditIndex(null)
+                    setTaskModalOpen(true)
+                  }}
+                />
+              }
             />
             <Route
               path="/tasks"
               element={
                 <TasksPage
                   tasks={tasks}
-                  onNewTask={() => setTaskModalOpen(true)}
+                  onToggleTask={handleToggleTask}
+                  onDeleteTask={handleDeleteTask}
+                  onEditTask={task => handleEditTask(task)}
+                  onNewTask={() => {
+                    setEditingTask(null)
+                    setPreviewEditIndex(null)
+                    setTaskModalOpen(true)
+                  }}
                   onOpenAgent={() => setAgentOpen(true)}
                 />
               }
@@ -134,26 +338,43 @@ export default function App() {
             mode={agentMode}
             onModeChange={setAgentMode}
             onClose={() => setAgentOpen(false)}
-            conversation={conversation}
-            setConversation={setConversation}
+            conversation={activeMessages}
+            conversations={conversationStore.conversations}
+            activeConversationId={conversationStore.activeConversationId}
+            setConversation={setActiveConversationMessages}
+            onSetActiveConversation={setActiveConversation}
+            onCreateConversation={createNewConversation}
+            onDeleteConversation={deleteConversation}
+            onRenameActiveConversation={renameActiveConversation}
             tasks={tasks}
             onAddTasks={addTasks}
             onEditTask={handleEditTask}
+            onToggleTask={handleToggleTask}
+            onDeleteTask={handleDeleteTask}
+            onUpdateTask={handleUpdateTask}
             showToast={showToast}
           />
         )}
 
-        <AgentFab onToggle={() => setAgentOpen(o => !o)} />
+        {!agentOpen && (
+          <AgentFab onToggle={() => setAgentOpen(o => !o)} />
+        )}
       </div>
 
       <TaskModal
         open={taskModalOpen}
-        onClose={() => { setTaskModalOpen(false); setEditingTask(null) }}
+        onClose={() => {
+          setTaskModalOpen(false)
+          setEditingTask(null)
+          setPreviewEditIndex(null)
+          setPreviewEditConversationId(null)
+        }}
         onAdd={handleNewTask}
         initialData={editingTask}
       />
 
       <Toast message={toast} />
-    </BrowserRouter>
+      </BrowserRouter>
+    </ErrorBoundary>
   )
 }

@@ -1,16 +1,20 @@
 import { parseRelativeDate, computeGroup, formatDate, getTodayISO, addDays } from './dateUtils'
+import { buildCalendarLink, buildGmailLink, buildTaskEmailDraft } from '../lib/googleLinks'
 
 // ─── Intent Classification ────────────────────────────────────────────────────
 
-export function classifyIntent(text, conversationHistory = []) {
+export function classifyIntent(text) {
   const t = text.toLowerCase().trim()
 
   // 1. Schedule query
   if (
     /what\s+(do\s+i\s+have|have\s+i\s+got|is\s+on|are\s+on|do\s+i\s+have\s+on)\s*(today|tomorrow|this\s+week|my\s+schedule|on\s+my\s+schedule)?/i.test(t) ||
+    /what(\s+do)?\s+i\s+have(\s+to)?\s+do\s+tomorrow/i.test(t) ||
     /what.{0,25}(schedule|due\s+today|today.{0,10}due|on\s+for|coming\s+up)/i.test(t) ||
     /show\s+(me\s+)?(today|my\s+tasks|what.{0,15}have)/i.test(t) ||
-    /what.{0,10}(do\s+i\s+have|have\s+today)/i.test(t)
+    /what.{0,10}(do\s+i\s+have|have\s+today)/i.test(t) ||
+    // Short follow-up after a schedule question (“show me”, “list it”, “again”)
+    /^(show(\s+me)?|list(\s+it|them)?|more|again|which\s+ones|repeat)\s*!*\.?$/i.test(t)
   ) {
     return 'schedule_query'
   }
@@ -20,29 +24,26 @@ export function classifyIntent(text, conversationHistory = []) {
     return 'explicit_add'
   }
 
-  // 3. Study help
-  if (/\b(help\s+me\s+with|explain|quiz\s+me|i\s+don.{0,2}t\s+understand|how\s+do\s+i|what\s+is\s+a?\s+\w|what\s+are\s+\w|can\s+you\s+explain|i.{0,3}m\s+stuck|stuck\s+on|teach\s+me|walk\s+me\s+through)\b/i.test(t)) {
-    return 'study_help'
-  }
-
-  // 4. Planning
+  // 3. Planning
   if (/\b(prepare\s+for|plan\s+my|help\s+me\s+study\s+for|build\s+(a\s+)?study\s+plan|make\s+(a\s+)?plan|get\s+ready\s+for|how\s+should\s+i\s+study)\b/i.test(t)) {
     return 'planning'
   }
 
-  // 5. Ambiguous implied task — temporal + activity, but no "add"/"remind"/"schedule"
+  if (/\b(add\s+to\s+calendar|sync\s+to\s+google|put\s+it\s+on\s+my\s+calendar|google\s+calendar)\b/i.test(t)) {
+    return 'calendar_link'
+  }
+
+  if (/\b(email\s+\w+|send\s+email|email\s+about|confirmation\s+email)\b/i.test(t)) {
+    return 'email_link'
+  }
+
+  // 4. Ambiguous implied task — temporal + activity, but no "add"/"remind"/"schedule"
   const hasTimeRef = /\b(tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+week|at\s+\d|[0-9]\s?(am|pm)|noon|this\s+(sat|sun|week))\b/i.test(t)
   const hasActivity = /\b(meeting|call|exam|hw|homework|lab|reading|study|review|office\s+hours|class|lecture|quiz|midterm|final|project|assignment|appointment|session)\b/i.test(t)
   if (hasTimeRef && hasActivity) return 'ambiguous_implied_task'
 
-  // 6. Follow-up — last assistant msg ended with '?'
-  const lastMsg = conversationHistory[conversationHistory.length - 1]
-  if (lastMsg && lastMsg.role === 'assistant' && typeof lastMsg.text === 'string' && lastMsg.text.trim().endsWith('?')) {
-    return 'follow_up'
-  }
-
-  // 7. Fallback
-  return 'general_chat'
+  // 5. Natural language: local LLM (Ollama) + system prompt — study help, follow-ups, explanations, etc.
+  return 'tutor_conversation'
 }
 
 // ─── Task Parser ──────────────────────────────────────────────────────────────
@@ -68,20 +69,27 @@ export function parseTaskFromText(text) {
   // --- Category ---
   let category = 'personal'
   if (/\b(meeting|call|office\s+hours|zoom|teams|webex|appointment)\b/i.test(text)) {
-    category = 'meeting'
+    category = 'event'
   } else if (/\b(study|review|practice|prep|preparation|revision)\b/i.test(text)) {
-    category = 'study'
+    category = 'coursework'
   } else if (course || /\b(exam|hw|homework|lab|reading|lecture|assignment|problem\s+set|midterm|final|quiz)\b/i.test(text)) {
-    category = 'academic'
+    category = 'coursework'
   }
 
   // --- Type ---
-  const typeDefaults = { academic: 'HW', meeting: 'Meeting', study: 'Study', personal: 'Other' }
+  const typeDefaults = { coursework: 'HW', event: 'Meeting', personal: 'Other' }
   let type = typeDefaults[category]
-  if (category === 'academic') {
+  if (category === 'coursework') {
     if (/\b(exam|midterm|final)\b/i.test(text)) type = 'Exam'
     else if (/\blab\b/i.test(text)) type = 'Lab'
     else if (/\b(reading|read)\b/i.test(text)) type = 'Reading'
+    else if (/\bproject\b/i.test(text)) type = 'Project'
+  } else if (category === 'event') {
+    if (/\boffice\s+hours\b/i.test(text)) type = 'Office hours'
+    else if (/\bclass|lecture\b/i.test(text)) type = 'Class'
+  } else if (category === 'personal') {
+    if (/\berrand\b/i.test(text)) type = 'Errand'
+    else if (/\bstudy|practice|review\b/i.test(text)) type = 'Study'
   }
 
   // --- Time ---
@@ -117,6 +125,8 @@ export function parseTaskFromText(text) {
   // --- Link ---
   const linkMatch = text.match(/(https?:\/\/[^\s]+)/i)
   const link = linkMatch ? linkMatch[1] : null
+  const emailMatch = text.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)
+  const email = emailMatch ? emailMatch[0] : null
 
   // --- Name: strip extracted tokens ---
   let name = text
@@ -133,6 +143,7 @@ export function parseTaskFromText(text) {
   // strip location phrases
   name = name.replace(/\b(on|in|at)\s+(zoom|teams|room|rm\.?|building|hall)\s*[A-Z0-9\-]*/gi, '')
   if (link) name = name.replace(/(https?:\/\/[^\s]+)/g, '')
+  if (email) name = name.replace(new RegExp(email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '')
   // strip filler conjunctions
   name = name.replace(/\b(for|my|a|an|the|to|and|due|by|on|,|\.)\b/gi, ' ')
   name = name.replace(/[,\.]+/g, ' ')
@@ -146,36 +157,173 @@ export function parseTaskFromText(text) {
     name = name.replace(/\b\w/g, c => c.toUpperCase())
   }
 
-  return { name, category, type, course, date, time, location, link, notes: null }
+  return { name, category, type, course, date, time, location, link, email, notes: null }
 }
 
 // ─── Response Generator ───────────────────────────────────────────────────────
 
+function toTitleCase(s) {
+  return s
+    .split(' ')
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+}
+
+function isGenericTaskTitle(name) {
+  const n = (name || '').toLowerCase().trim()
+  if (!n) return true
+  return (
+    /^(task|new task|add task|this|that|it)$/.test(n) ||
+    /^add\s+(this|that|it)(\s+task)?/.test(n) ||
+    /\bthis\s+task\b/.test(n) ||
+    /(can|could|pls|please)\s+(u|you)\s+add\s+(this|that|it)/.test(n) ||
+    /(as\s+)?new\s+task/.test(n) ||
+    /^add.*\b(today|tomorrow|tonight|next\s+\w+)\b/.test(n)
+  )
+}
+
+function stripAddPhrasing(text) {
+  let s = (text || '').trim()
+  s = s.replace(/^(can|could|pls|please)\s+(u|you)\s+/i, '')
+  s = s.replace(/^(add|create|schedule|set)\s+(this|that|it)?\s*(as\s+)?(a\s+)?new\s+task\s*(for)?\s*/i, '')
+  s = s.replace(/^(add|create|schedule|set)\s+(a\s+)?task\s*(for)?\s*/i, '')
+  s = s.replace(/^add\s+this\s+task(\s+for)?\s*/i, '')
+  s = s.replace(/\b(as\s+)?(a\s+)?new\s+task\b/gi, '')
+  s = s.replace(/\b(this|that|it)\s+task\b/gi, '')
+  s = s.replace(/\b(for\s+)?(today|tomorrow|tonight|next\s+week|this\s+week)\b/gi, '')
+  s = s.replace(/[?!.]+$/g, '')
+  s = s.replace(/\s+/g, ' ').trim()
+  return s
+}
+
+function normalizeTopicPhrase(text) {
+  let s = (text || '').trim()
+  s = s.replace(/^(i\s+have\s+to|i\s+need\s+to|i\s+gotta|i\s+want\s+to)\s+/i, '')
+  s = s.replace(/^(go\s+to|attend|do|work\s+on|study)\s+/i, '')
+  s = s.replace(/\b(at\s+)?\d{1,2}(:\d{2})?\s*(am|pm)\b/gi, '')
+  s = s.replace(/\b(today|tomorrow|tonight|next\s+week|this\s+week)\b/gi, '')
+  s = s.replace(/\b(with|for|on|in)\s+$/i, '')
+  s = s.replace(/[?!.]+$/g, '')
+  s = s.replace(/\s+/g, ' ').trim()
+  return s
+}
+
+function findContextTopic(conversationHistory, currentText) {
+  for (let i = conversationHistory.length - 1; i >= 0; i--) {
+    const m = conversationHistory[i]
+    if (m?.role !== 'user' || !m.text) continue
+    const raw = m.text.trim()
+    if (!raw || raw === currentText) continue
+    const lower = raw.toLowerCase()
+    // Skip other command-like lines.
+    if (/\b(add|remind|schedule|create\s+(a\s+)?task|new\s+task|what\s+do\s+i\s+have|show\s+me)\b/.test(lower)) continue
+    const topic = stripAddPhrasing(raw)
+    if (topic.length >= 5) return topic
+  }
+  return null
+}
+
+function buildBetterTaskTitle(rawText, parsedName, conversationHistory) {
+  if (!isGenericTaskTitle(parsedName)) return parsedName
+  const fromCurrent = normalizeTopicPhrase(stripAddPhrasing(rawText))
+  if (fromCurrent.length >= 5 && !isGenericTaskTitle(fromCurrent)) {
+    return toTitleCase(fromCurrent)
+  }
+  const fromContext = findContextTopic(conversationHistory, rawText)
+  const normalizedContext = normalizeTopicPhrase(fromContext || '')
+  if (normalizedContext.length >= 5) return toTitleCase(normalizedContext)
+  return parsedName
+}
+
+function lastAssistantMessage(conversationHistory) {
+  for (let i = conversationHistory.length - 1; i >= 0; i--) {
+    if (conversationHistory[i].role === 'assistant') return conversationHistory[i]
+  }
+  return null
+}
+
+/** When the user says only “show me” / “list it”, infer today / tomorrow / week from recent chat. */
+function inferScheduleQueryKind(userText, conversationHistory) {
+  const t = (userText || '').toLowerCase().trim()
+  if (/this\s+week|next\s+week|my\s+week|rest\s+of\s+(the\s+)?week/.test(t)) return 'week'
+  if (/tomorrow|next\s+day/.test(t)) return 'tomorrow'
+  if (/\b(today|tonight)\b/.test(t) && !/tomorrow/.test(t)) return 'today'
+
+  if (/^(show(\s+me)?|list(\s+it|them)?|more|again|which\s+ones|repeat)\b/i.test(t)) {
+    for (let i = conversationHistory.length - 1; i >= 0; i--) {
+      const m = conversationHistory[i]
+      if (m?.role !== 'user' || !m.text) continue
+      const u = m.text.toLowerCase()
+      if (/this\s+week|next\s+week|my\s+week/.test(u)) return 'week'
+      if (/tomorrow|next\s+day|what do i have to do tomorrow|due tomorrow/.test(u)) return 'tomorrow'
+      if (/(^|\b)(today|tonight)\b.*(have|due|schedule)|what do i have to do today/.test(u)) return 'today'
+    }
+    const a = lastAssistantMessage(conversationHistory)
+    if (a?.text) {
+      const at = a.text.toLowerCase()
+      if (/this\s+week|next\s+week|your week|coming up/.test(at)) return 'week'
+      if (/tomorrow|next day/.test(at)) return 'tomorrow'
+    }
+  }
+  return 'today'
+}
+
 export function generateResponse(intent, text, tasks, conversationHistory) {
+  const latestTask = (tasks || []).length ? tasks[tasks.length - 1] : null
   switch (intent) {
     case 'explicit_add':
     case 'ambiguous_implied_task': {
       const parsed = parseTaskFromText(text)
+      const improvedName = buildBetterTaskTitle(text, parsed.name, conversationHistory)
       const hasDate = !!parsed.date
       const responseText = intent === 'explicit_add'
         ? (hasDate ? "Got it — here's what I'll add:" : "I can add that. The date wasn't clear so I've left it for you to confirm:")
         : "Sounds like something for your schedule — want me to add it?"
-      return { text: responseText, preview: { ...parsed, id: crypto.randomUUID(), completed: false, completedAt: null, source: 'agent' } }
+      return { text: responseText, preview: { ...parsed, name: improvedName, id: crypto.randomUUID(), completed: false, completedAt: null, source: 'agent' } }
     }
 
-    case 'study_help': {
-      const t = text.toLowerCase()
-      if (/quiz\s*me/i.test(t)) {
-        return { text: "Sure — here's one: If a function f(n) is defined as f(1) = 1 and f(n) = f(n−1) + n for n > 1, what is f(5)? Walk me through each step." }
+    case 'calendar_link': {
+      if (!latestTask || !latestTask.date) {
+        return { text: 'I need a task with a date first. Add or pick one, then I can open Google Calendar.' }
       }
-      if (/explain|what\s+is|what\s+are/i.test(t)) {
-        const topic = text.replace(/^(explain|what\s+is\s+a?\s*|what\s+are\s*|can\s+you\s+explain\s*)/i, '').replace(/[?\.]+$/, '').trim()
-        return { text: `Happy to help with${topic ? ` "${topic}"` : ' that'}. Break it down for me — what's the context? (e.g. which course, what level, and where you're stuck.)` }
+      return {
+        text: "Here's the calendar link — click to add:",
+        action: {
+          type: 'open-link',
+          title: 'Google Calendar',
+          body: `Add "${latestTask.name}" to Google Calendar.`,
+          btn: 'Open Google Calendar',
+          href: buildCalendarLink(latestTask),
+        },
       }
-      if (/stuck|don.t\s+understand|struggling/i.test(t)) {
-        return { text: "No worries — let's work through it together. What step are you stuck on? Share what you've tried so far and I'll help from there." }
+    }
+
+    case 'email_link': {
+      if (!latestTask) {
+        return { text: 'I need a task first. Add one, then I can draft the email link.' }
       }
-      return { text: "Happy to help. What specifically are you working on? Share the topic or the problem and I'll walk you through it." }
+      if (!latestTask.email) {
+        return { text: "I can draft it, but I need the recipient email first. What's the email address?" }
+      }
+      const { subject, body } = buildTaskEmailDraft(latestTask)
+      return {
+        text: "Here's the email link — open it to edit and send:",
+        action: {
+          type: 'open-link',
+          title: 'Gmail Draft',
+          body: `Draft for "${latestTask.name}"`,
+          btn: 'Open Gmail',
+          href: buildGmailLink({ to: latestTask.email, subject, body }),
+        },
+      }
+    }
+
+    case 'tutor_conversation': {
+      return {
+        text: "I'm here to help with tasks, scheduling, and studying. I can also sync tasks to Google Calendar or draft emails — just ask.",
+        useOllama: true,
+      }
     }
 
     case 'planning': {
@@ -190,19 +338,19 @@ export function generateResponse(intent, text, tasks, conversationHistory) {
       const label = courseName || 'your exam'
       const studyTasks = [
         {
-          id: crypto.randomUUID(), name: `Review notes — ${label}`, category: 'study',
+          id: crypto.randomUUID(), name: `Review notes — ${label}`, category: 'coursework',
           type: 'Study', course: courseName, date: today,
           time: null, location: null, link: null, notes: null,
           completed: false, completedAt: null, source: 'agent',
         },
         {
-          id: crypto.randomUUID(), name: `Practice problems — ${label}`, category: 'study',
+          id: crypto.randomUUID(), name: `Practice problems — ${label}`, category: 'coursework',
           type: 'Study', course: courseName, date: addDays(today, 1),
           time: null, location: null, link: null, notes: null,
           completed: false, completedAt: null, source: 'agent',
         },
         {
-          id: crypto.randomUUID(), name: `Light review + rest — ${label}`, category: 'study',
+          id: crypto.randomUUID(), name: `Light review + rest — ${label}`, category: 'coursework',
           type: 'Study', course: courseName, date: addDays(today, 2),
           time: null, location: null, link: null, notes: null,
           completed: false, completedAt: null, source: 'agent',
@@ -224,10 +372,7 @@ export function generateResponse(intent, text, tasks, conversationHistory) {
       if (!tasks || tasks.length === 0) {
         return { text: "Your schedule is clear — no tasks yet. Add one with the button above, or just tell me what you're working on." }
       }
-      const t = text.toLowerCase()
-      let targetGroup = 'today'
-      if (/tomorrow/i.test(t)) targetGroup = 'tomorrow'
-      else if (/this\s+week|next\s+week/i.test(t)) targetGroup = 'week'
+      const targetGroup = inferScheduleQueryKind(text, conversationHistory)
 
       if (targetGroup === 'tomorrow') {
         const tomorrow = addDays(getTodayISO(), 1)
@@ -251,12 +396,11 @@ export function generateResponse(intent, text, tasks, conversationHistory) {
       return { text: `You have ${todayItems.length} thing${todayItems.length > 1 ? 's' : ''} today:\n\n${list}` }
     }
 
-    case 'follow_up': {
-      const lastMsg = conversationHistory[conversationHistory.length - 1]
-      return { text: `Got it — ${lastMsg?.text?.includes('date') ? "I'll note that." : "thanks for the context."} Anything else you'd like to add or ask about?` }
+    default: {
+      return {
+        text: "I'm here to help with tasks, scheduling, and studying. I can also sync tasks to Google Calendar or draft emails — just ask.",
+        useOllama: true,
+      }
     }
-
-    default:
-      return { text: "I'm here to help with tasks, scheduling, and studying. What are you working on?" }
   }
 }

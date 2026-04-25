@@ -1,22 +1,217 @@
-import { useRef, useEffect, useState } from 'react'
-import { X, Maximize2, Minimize2, Send } from 'lucide-react'
+import { useRef, useEffect, useMemo, useState } from 'react'
+import { X, Maximize2, Minimize2, Send, Mic, Square, Menu, Plus } from 'lucide-react'
 import ChatMessage from '../Agent/ChatMessage'
 import QuickReplies from '../Agent/QuickReplies'
 import { classifyIntent, generateResponse } from '../../utils/agentUtils'
+import { fetchOllamaTutorResponse, suggestTaskTitle } from '../../utils/webllmClient'
+import { formatDate, parseRelativeDate } from '../../utils/dateUtils'
+import { buildCalendarLink, buildGmailLink, buildTaskEmailDraft } from '../../lib/googleLinks'
+import Logo from '../Logo'
 
 const EMPTY_CHIPS = ['What do I have today?', 'Help me plan my week', 'Quiz me on a topic']
 const NORMAL_CHIPS = ['What do I have today?', "I'm stuck", 'Quiz me']
 
-export default function AgentPanel({ mode, onModeChange, onClose, conversation, setConversation, tasks, onAddTasks, onEditTask, showToast }) {
+function isGoodTitle(title) {
+  const t = (title || '').trim()
+  if (t.length < 3 || t.length > 60) return false
+  if (/\?$/.test(t)) return false
+  if (/\b(can|could|pls|please)\b/i.test(t)) return false
+  if (/\b(add|new)\s+task\b/i.test(t)) return false
+  return true
+}
+
+export default function AgentPanel({
+  mode,
+  onModeChange,
+  onClose,
+  conversation,
+  conversations = [],
+  activeConversationId,
+  setConversation,
+  onSetActiveConversation,
+  onCreateConversation,
+  onDeleteConversation,
+  onRenameActiveConversation,
+  tasks,
+  onAddTasks,
+  onEditTask,
+  onToggleTask,
+  onDeleteTask,
+  onUpdateTask,
+  showToast,
+}) {
   const messagesRef = useRef(null)
+  const recognitionRef = useRef(null)
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [llmStatus, setLlmStatus] = useState('idle')
+  const [isListening, setIsListening] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState(null)
+  const [hoveredConversationId, setHoveredConversationId] = useState(null)
 
   useEffect(() => {
     if (messagesRef.current) {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight
     }
   }, [conversation, isTyping])
+
+  useEffect(() => {
+    if (mode === 'fullscreen') setHistoryOpen(false)
+  }, [mode])
+
+  useEffect(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SR) return
+    setSpeechSupported(true)
+
+    const rec = new SR()
+    rec.lang = 'en-US'
+    rec.interimResults = true
+    rec.continuous = false
+    rec.maxAlternatives = 1
+
+    rec.onresult = (event) => {
+      let transcript = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript
+      }
+      setInputValue(transcript.trim())
+    }
+    rec.onstart = () => setIsListening(true)
+    rec.onend = () => setIsListening(false)
+    rec.onerror = () => setIsListening(false)
+
+    recognitionRef.current = rec
+    return () => {
+      try { rec.stop() } catch { /* ignore */ }
+      recognitionRef.current = null
+    }
+  }, [])
+
+  function toggleVoiceInput() {
+    if (!speechSupported || !recognitionRef.current) return
+    if (isListening) {
+      try { recognitionRef.current.stop() } catch { /* ignore */ }
+      return
+    }
+    try {
+      recognitionRef.current.start()
+    } catch {
+      setIsListening(false)
+    }
+  }
+
+  function normalizeQuery(s) {
+    return (s || '')
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  function findTaskByQuery(rawQuery) {
+    const query = normalizeQuery(rawQuery)
+    if (!query) return null
+    const qWords = query.split(' ').filter(w => w.length > 1)
+    let best = null
+    let bestScore = -1
+    for (const t of tasks) {
+      const name = normalizeQuery(t.name)
+      if (!name) continue
+      let score = 0
+      if (name.includes(query)) score += 4
+      for (const w of qWords) {
+        if (name.includes(w)) score += 1
+      }
+      if (score > bestScore) {
+        best = t
+        bestScore = score
+      }
+    }
+    return bestScore > 0 ? best : null
+  }
+
+  function parseTaskCommand(text) {
+    const t = text.trim()
+    const lower = t.toLowerCase()
+
+    let m = lower.match(/(?:mark|set)\s+(.+?)\s+(?:as\s+)?(done|complete|completed)$/)
+    if (m) return { type: 'done', query: m[1] }
+
+    m = lower.match(/^(?:done|complete|completed)\s+(.+)$/)
+    if (m) return { type: 'done', query: m[1] }
+
+    m = lower.match(/^(?:undo|reopen)\s+(.+)$/)
+    if (m) return { type: 'undo', query: m[1] }
+
+    m = lower.match(/(?:delete|remove)\s+(?:task\s+)?(.+)$/)
+    if (m) return { type: 'delete', query: m[1] }
+
+    m = lower.match(/^edit\s+(?:task\s+)?(.+)$/)
+    if (m) return { type: 'edit', query: m[1] }
+
+    m = lower.match(/(?:move|reschedule|change|set)\s+(.+?)\s+(?:to|for)\s+(.+)$/)
+    if (m) return { type: 'reschedule', query: m[1], when: m[2] }
+
+    if (/\b(add to calendar|sync to google|put it on my calendar|google calendar)\b/i.test(lower)) {
+      return { type: 'calendar' }
+    }
+
+    m = lower.match(/(?:email|send email about|send)\s+(.+)$/)
+    if (m) return { type: 'email', query: m[1] }
+
+    return null
+  }
+
+  function parseTimeFromText(text) {
+    const t = (text || '').toLowerCase()
+    if (/\bnoon\b/.test(t)) return '12:00'
+    if (/\bmidnight\b/.test(t)) return '00:00'
+    const m = t.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/)
+    if (!m) return null
+    let h = parseInt(m[1], 10)
+    const min = m[2] ? parseInt(m[2], 10) : 0
+    const ap = m[3]
+    if (ap === 'pm' && h !== 12) h += 12
+    if (ap === 'am' && h === 12) h = 0
+    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+  }
+
+  function formatHumanDateTime(date, time) {
+    return formatDate(date, time)
+  }
+
+  function buildTaskGmailLink(task) {
+    if (!task?.email) return null
+    const { subject, body } = buildTaskEmailDraft(task)
+    return buildGmailLink({ to: task.email, subject, body })
+  }
+
+  function extractEmail(text) {
+    const match = (text || '').match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)
+    return match ? match[0] : null
+  }
+
+  function findEmailTargetTask() {
+    const withEmail = [...tasks].reverse().find(t => t?.email)
+    if (withEmail) return withEmail
+    return [...tasks].reverse().find(t => t?.category === 'event') || tasks[tasks.length - 1] || null
+  }
+
+  function pushAssistantAction(text, action) {
+    const response = { role: 'assistant', text, ...(action ? { action } : {}) }
+    setConversation(prev => [...prev, response])
+  }
+
+  function buildTitleFromMessage(text) {
+    return (text || '')
+      .trim()
+      .replace(/[.!?,;:)\]]+$/g, '')
+      .slice(0, 40)
+      .trim() || 'New chat'
+  }
 
   function sendMessage(text) {
     const trimmed = text.trim()
@@ -25,19 +220,165 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
     const userMsg = { role: 'user', text: trimmed }
     const nextConv = [...conversation, userMsg]
     setConversation(nextConv)
-    localStorage.setItem('planner_conversation', JSON.stringify(nextConv))
+    if (conversation.length === 0) {
+      onRenameActiveConversation?.(buildTitleFromMessage(trimmed))
+    }
     setInputValue('')
     setIsTyping(true)
 
-    setTimeout(() => {
-      const intent = classifyIntent(trimmed, nextConv)
-      const { text: respText, preview, action } = generateResponse(intent, trimmed, tasks, nextConv)
-      const response = { role: 'assistant', text: respText, ...(preview ? { preview } : {}), ...(action ? { action } : {}) }
-      const withResponse = [...nextConv, response]
-      setConversation(withResponse)
-      localStorage.setItem('planner_conversation', JSON.stringify(withResponse))
-      setIsTyping(false)
-    }, 800)
+    void (async () => {
+      try {
+        const lastAssistantText = [...conversation]
+          .reverse()
+          .find(m => m?.role === 'assistant' && typeof m.text === 'string')
+          ?.text || ''
+        const awaitingRecipient = /recipient'?s email|what'?s the recipient'?s email/i.test(lastAssistantText)
+        const providedEmail = extractEmail(trimmed)
+        if (awaitingRecipient && providedEmail) {
+          const target = findEmailTargetTask()
+          if (!target) {
+            const response = { role: 'assistant', text: "I couldn't find the related task to attach this email to yet." }
+            setConversation([...nextConv, response])
+            return
+          }
+          const withEmail = { ...target, email: providedEmail }
+          onUpdateTask?.(target.id, { email: providedEmail })
+          const response = {
+            role: 'assistant',
+            text: "Here's the draft. Click Open Gmail to review and send.",
+            action: {
+              type: 'open-link',
+              title: 'GMAIL DRAFT',
+              body: `Draft a confirmation for "${withEmail.name}"`,
+              btn: 'Open Gmail',
+              href: buildTaskGmailLink(withEmail),
+            },
+          }
+          setConversation([...nextConv, response])
+          return
+        }
+
+        const command = parseTaskCommand(trimmed)
+        if (command) {
+          const matched = findTaskByQuery(command.query)
+          let respText = ''
+          if (command.type === 'calendar') {
+            const latest = [...tasks].reverse().find(t => !!t.date)
+            if (!latest) {
+              respText = 'I need a task with a date first so I can open Google Calendar.'
+            } else {
+              const response = {
+                role: 'assistant',
+                text: "Here's the calendar event ready to add. Click Open Google Calendar to add it.",
+                action: {
+                  type: 'open-link',
+                  title: 'Google Calendar',
+                  body: `Add "${latest.name}" to Google Calendar.`,
+                  btn: 'Open Google Calendar',
+                  href: buildCalendarLink(latest),
+                },
+              }
+              const withResponse = [...nextConv, response]
+              setConversation(withResponse)
+              return
+            }
+          } else if (command.type === 'email') {
+            const target = matched || [...tasks].reverse().find(t => !!t.email)
+            if (!target) {
+              respText = "I couldn't find a matching task to email about yet."
+            } else if (!target.email) {
+              respText = "I can draft it, but I need the recipient email first. Add it in task edit."
+            } else {
+              const response = {
+                role: 'assistant',
+                text: "Here's the email link — open it to edit and send:",
+                action: {
+                  type: 'open-link',
+                  title: 'Gmail Draft',
+                  body: `Draft for "${target.name}"`,
+                  btn: 'Open Gmail',
+                  href: buildTaskGmailLink(target),
+                },
+              }
+              const withResponse = [...nextConv, response]
+              setConversation(withResponse)
+              return
+            }
+          } else if (!matched) {
+            respText = `I couldn’t find a task matching "${command.query}". Try a clearer task name.`
+          } else if (command.type === 'done') {
+            if (matched.completed) {
+              respText = `"${matched.name}" is already marked done.`
+            } else {
+              onToggleTask?.(matched.id)
+              showToast?.('Task completed')
+              respText = `Done — marked "${matched.name}" as completed.`
+            }
+          } else if (command.type === 'undo') {
+            if (!matched.completed) {
+              respText = `"${matched.name}" is already open.`
+            } else {
+              onToggleTask?.(matched.id)
+              showToast?.('Task reopened')
+              respText = `Reopened "${matched.name}".`
+            }
+          } else if (command.type === 'delete') {
+            onDeleteTask?.(matched.id)
+            showToast?.('Task deleted')
+            respText = `Deleted "${matched.name}".`
+          } else if (command.type === 'edit') {
+            onEditTask?.(matched)
+            respText = `Opening edit for "${matched.name}".`
+          } else if (command.type === 'reschedule') {
+            const date = parseRelativeDate(command.when || '')
+            if (!date) {
+              respText = `I couldn’t parse the new date in "${command.when}". Try something like "next Friday at 9am".`
+            } else {
+              const parsedTime = parseTimeFromText(command.when || '')
+              onUpdateTask?.(matched.id, { date, ...(parsedTime ? { time: parsedTime } : {}) })
+              showToast?.('Task rescheduled')
+              respText = `Rescheduled "${matched.name}" to ${formatHumanDateTime(date, parsedTime)}.`
+            }
+          }
+          const response = { role: 'assistant', text: respText }
+          const withResponse = [...nextConv, response]
+          setConversation(withResponse)
+          return
+        }
+
+        const intent = classifyIntent(trimmed)
+        let { text: respText, preview, action, useOllama } = generateResponse(intent, trimmed, tasks, nextConv)
+        if (preview && (intent === 'explicit_add' || intent === 'ambiguous_implied_task')) {
+          const aiTitle = await suggestTaskTitle({
+            userText: trimmed,
+            conversationHistory: nextConv,
+            preview,
+          })
+          if (isGoodTitle(aiTitle)) {
+            preview = { ...preview, name: aiTitle }
+          }
+        }
+        if (useOllama) {
+          setLlmStatus('loading')
+          const llm = await fetchOllamaTutorResponse({
+            userText: trimmed,
+            conversationHistory: nextConv,
+            tasks,
+          })
+          if (llm) {
+            respText = llm
+            setLlmStatus('ready')
+          } else {
+            setLlmStatus('error')
+          }
+        }
+        const response = { role: 'assistant', text: respText, ...(preview ? { preview } : {}), ...(action ? { action } : {}) }
+        const withResponse = [...nextConv, response]
+        setConversation(withResponse)
+      } finally {
+        setIsTyping(false)
+      }
+    })()
   }
 
   function handleAddFromAction(msgIndex) {
@@ -49,7 +390,29 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
       i === msgIndex ? { ...m, action: { ...m.action, added: true } } : m
     )
     setConversation(updated)
-    localStorage.setItem('planner_conversation', JSON.stringify(updated))
+    const firstTask = msg.action.tasks[0]
+    if (firstTask?.date) {
+      pushAssistantAction('Want me to add this to your Google Calendar?', {
+        type: 'open-link',
+        title: 'Google Calendar',
+        body: `Add "${firstTask.name}" to your calendar.`,
+        btn: 'Open Google Calendar',
+        href: buildCalendarLink(firstTask),
+      })
+    }
+    if (firstTask?.category === 'event') {
+      if (firstTask?.email) {
+        pushAssistantAction('Email a confirmation?', {
+          type: 'open-link',
+          title: 'Gmail Draft',
+          body: `Draft a confirmation for "${firstTask.name}"`,
+          btn: 'Open Gmail',
+          href: buildTaskGmailLink(firstTask),
+        })
+      } else {
+        pushAssistantAction("Email a confirmation? What's the recipient's email?")
+      }
+    }
   }
 
   function handleAddPreview(msgIndex) {
@@ -61,11 +424,32 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
       i === msgIndex ? { ...m, preview: { ...m.preview, added: true } } : m
     )
     setConversation(updated)
-    localStorage.setItem('planner_conversation', JSON.stringify(updated))
+    if (msg.preview?.date) {
+      pushAssistantAction('Want me to add this to your Google Calendar?', {
+        type: 'open-link',
+        title: 'Google Calendar',
+        body: `Add "${msg.preview.name}" to your calendar.`,
+        btn: 'Open Google Calendar',
+        href: buildCalendarLink(msg.preview),
+      })
+    }
+    if (msg.preview?.category === 'event') {
+      if (msg.preview?.email) {
+        pushAssistantAction('Email a confirmation?', {
+          type: 'open-link',
+          title: 'Gmail Draft',
+          body: `Draft a confirmation for "${msg.preview.name}"`,
+          btn: 'Open Gmail',
+          href: buildTaskGmailLink(msg.preview),
+        })
+      } else {
+        pushAssistantAction("Email a confirmation? What's the recipient's email?")
+      }
+    }
   }
 
-  function handleEditPreview(task) {
-    onEditTask?.(task)
+  function handleEditPreview(msgIndex, task) {
+    onEditTask?.(task, msgIndex, activeConversationId)
   }
 
   function handleCancelPreview(msgIndex) {
@@ -73,25 +457,39 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
       i === msgIndex ? { ...m, preview: null } : m
     )
     setConversation(updated)
-    localStorage.setItem('planner_conversation', JSON.stringify(updated))
   }
 
   const isSidebar = mode === 'sidebar'
   const isEmpty = conversation.length === 0
+  const llmStatusLabel =
+    llmStatus === 'loading'
+      ? 'WebLLM loading...'
+      : llmStatus === 'ready'
+        ? 'WebLLM ready'
+        : llmStatus === 'error'
+          ? 'WebLLM unavailable (fallback)'
+          : 'WebLLM idle'
+  const llmStatusColor =
+    llmStatus === 'loading'
+      ? '#facc15'
+      : llmStatus === 'ready'
+        ? 'var(--good)'
+        : llmStatus === 'error'
+          ? '#f87171'
+          : 'var(--dim)'
 
   const panelStyle = isSidebar
     ? {
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        width: 400,
-        height: '100vh',
+        position: 'relative',
+        width: 380,
+        minWidth: 380,
+        height: '100%',
         background: 'var(--surface)',
-        borderLeft: '1px solid var(--accent)',
-        boxShadow: '-4px 0 32px rgba(139,135,255,0.12)',
+        borderLeft: '1px solid #252525',
+        boxShadow: 'none',
         display: 'flex',
         flexDirection: 'column',
-        zIndex: 40,
+        flexShrink: 0,
         animation: 'slideInRight 0.22s ease',
       }
     : {
@@ -106,8 +504,219 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
       }
 
   const innerStyle = isSidebar
-    ? { display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }
-    : { display: 'flex', flexDirection: 'column', height: '100%', width: '100%', maxWidth: 720 }
+    ? { display: 'flex', flexDirection: 'column', height: '100%', width: '100%', position: 'relative' }
+    : { display: 'flex', height: '100%', width: '100%' }
+
+  const sortedConversations = useMemo(
+    () => [...conversations].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)),
+    [conversations]
+  )
+
+  function formatRelativeTime(iso) {
+    if (!iso) return ''
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return ''
+    const diff = Date.now() - d.getTime()
+    const m = Math.floor(diff / 60000)
+    const h = Math.floor(diff / 3600000)
+    const day = Math.floor(diff / 86400000)
+    if (m < 1) return 'Just now'
+    if (m < 60) return `${m}m ago`
+    if (h < 24) return `${h}h ago`
+    if (day === 1) return 'Yesterday'
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  const historyPane = (width) => (
+    <div
+      style={{
+        width,
+        minWidth: width,
+        borderRight: '1px solid var(--line)',
+        background: 'var(--surface-2)',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+      }}
+    >
+      <div style={{ padding: 12, borderBottom: '1px solid var(--line)' }}>
+        <button
+          onClick={() => {
+            onCreateConversation?.()
+            setPendingDeleteId(null)
+            setHistoryOpen(false)
+          }}
+          style={{
+            width: '100%',
+            border: 'none',
+            background: 'var(--accent)',
+            color: '#fff',
+            borderRadius: 8,
+            padding: '8px 10px',
+            fontSize: 12,
+            fontWeight: 600,
+            fontFamily: 'Inter, sans-serif',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
+        >
+          <Plus size={14} /> New chat
+        </button>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+        {sortedConversations.length === 0 ? (
+          <div
+            style={{
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              fontSize: 12,
+              color: 'var(--dim)',
+              padding: 12,
+            }}
+          >
+            No chats yet. Start one below.
+          </div>
+        ) : (
+          sortedConversations.map(conv => {
+            const active = conv.id === activeConversationId
+            const last = [...(conv.messages || [])].reverse().find(m => typeof m.text === 'string' && m.text.trim())
+            const preview = last?.text || 'No messages yet'
+            const confirmingDelete = pendingDeleteId === conv.id
+            return (
+              <div
+                key={conv.id}
+                style={{
+                  marginBottom: 6,
+                  borderRadius: 8,
+                  border: active ? '1px solid rgba(94,135,245,0.4)' : '1px solid transparent',
+                  borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
+                  background: active ? 'rgba(94,135,245,0.10)' : 'transparent',
+                  padding: 8,
+                }}
+                onMouseEnter={e => {
+                  if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.02)'
+                }}
+                onMouseLeave={e => {
+                  if (!active) e.currentTarget.style.background = 'transparent'
+                }}
+              >
+                {confirmingDelete ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>Delete this chat?</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => {
+                          onDeleteConversation?.(conv.id)
+                          setPendingDeleteId(null)
+                        }}
+                        style={{
+                          border: '1px solid rgba(212,82,82,0.45)',
+                          background: 'rgba(212,82,82,0.12)',
+                          color: '#ffb0b0',
+                          borderRadius: 6,
+                          padding: '4px 8px',
+                          fontSize: 11,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={() => setPendingDeleteId(null)}
+                        style={{
+                          border: '1px solid var(--line)',
+                          background: 'transparent',
+                          color: 'var(--dim)',
+                          borderRadius: 6,
+                          padding: '4px 8px',
+                          fontSize: 11,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      display: 'grid',
+                      gap: 3,
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => {
+                      onSetActiveConversation?.(conv.id)
+                      setHistoryOpen(false)
+                    }}
+                    onMouseEnter={() => setHoveredConversationId(conv.id)}
+                    onMouseLeave={() => setHoveredConversationId(null)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          color: 'var(--text)',
+                          fontWeight: 500,
+                          flex: 1,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {conv.title || 'New chat'}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setPendingDeleteId(conv.id)
+                        }}
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--faint)',
+                          fontSize: 14,
+                          cursor: 'pointer',
+                          lineHeight: 1,
+                          opacity: hoveredConversationId === conv.id ? 1 : 0,
+                          transition: 'opacity 0.15s',
+                        }}
+                        title="Delete chat"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--dim)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {preview}
+                    </div>
+                    <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: 'var(--faint)' }}>
+                      {formatRelativeTime(conv.updatedAt)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <>
@@ -142,6 +751,8 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
 
       <div style={panelStyle}>
         <div style={innerStyle}>
+          {!isSidebar && historyPane(260)}
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', position: 'relative' }}>
           {/* Header */}
           <div
             style={{
@@ -153,15 +764,37 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
               flexShrink: 0,
             }}
           >
+            {isSidebar && (
+              <button
+                onClick={() => setHistoryOpen(v => !v)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--dim)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 4,
+                  borderRadius: 6,
+                }}
+                title="Chat history"
+              >
+                <Menu size={16} strokeWidth={1.9} />
+              </button>
+            )}
             <div
               style={{
                 width: 28,
                 height: 28,
-                borderRadius: 8,
-                background: 'linear-gradient(135deg, var(--accent), #6361d1)',
                 flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
-            />
+            >
+              <Logo variant="mark" size={28} />
+            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
@@ -172,7 +805,7 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                   letterSpacing: '-0.2px',
                 }}
               >
-                Tutor
+                Task Copilot
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 1 }}>
                 <span
@@ -180,8 +813,8 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                     width: 6,
                     height: 6,
                     borderRadius: '50%',
-                    background: 'var(--good)',
-                    animation: 'pulse 2s infinite',
+                    background: llmStatusColor,
+                    animation: llmStatus === 'loading' ? 'pulse 2s infinite' : 'none',
                     flexShrink: 0,
                   }}
                 />
@@ -193,7 +826,7 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                     letterSpacing: '0.2px',
                   }}
                 >
-                  Local · Llama 3.2
+                  Local · {llmStatusLabel}
                 </span>
               </div>
             </div>
@@ -259,6 +892,28 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
             </button>
           </div>
 
+          {isSidebar && historyOpen && (
+            <>
+              <div
+                onClick={() => setHistoryOpen(false)}
+                style={{ position: 'absolute', inset: 0, background: 'transparent', zIndex: 2 }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 61,
+                  bottom: 0,
+                  width: 200,
+                  zIndex: 3,
+                  boxShadow: '8px 0 20px rgba(0,0,0,0.28)',
+                }}
+              >
+                {historyPane(200)}
+              </div>
+            </>
+          )}
+
           {/* Body */}
           {isEmpty ? (
             /* Welcome / empty state */
@@ -279,10 +934,14 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                   width: 40,
                   height: 40,
                   borderRadius: 12,
-                  background: 'linear-gradient(135deg, var(--accent), #6361d1)',
                   flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
-              />
+              >
+                <Logo variant="mark" size={40} />
+              </div>
               <div
                 style={{
                   fontFamily: 'Fraunces, serif',
@@ -292,7 +951,7 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                   letterSpacing: '-0.3px',
                 }}
               >
-                Hi, I'm your Tutor.
+                Hi, I'm Task Copilot.
               </div>
               <div
                 style={{
@@ -303,7 +962,7 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                   maxWidth: 280,
                 }}
               >
-                I can help you study or add tasks to your schedule. Ask me anything.
+                I can help you study or add tasks to your schedule. I can also sync tasks to Google Calendar or draft emails — just ask.
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 4 }}>
                 {EMPTY_CHIPS.map(chip => (
@@ -357,7 +1016,7 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                     msg.preview ? () => handleAddPreview(i) :
                     undefined
                   }
-                  onEdit={msg.preview ? (task) => handleEditPreview(task) : undefined}
+                  onEdit={msg.preview ? (task) => handleEditPreview(i, task) : undefined}
                   onCancel={msg.preview ? () => handleCancelPreview(i) : undefined}
                 />
               ))}
@@ -404,7 +1063,7 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
             >
               <input
                 type="text"
-                placeholder="Ask anything…"
+                placeholder="Ask anything..."
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
                 onKeyDown={e => {
@@ -429,6 +1088,35 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                 onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
               />
               <button
+                onClick={toggleVoiceInput}
+                disabled={!speechSupported}
+                title={
+                  !speechSupported
+                    ? 'Voice input not supported in this browser'
+                    : isListening
+                      ? 'Stop listening'
+                      : 'Start voice input'
+                }
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 9,
+                  background: isListening ? 'rgba(240,107,107,0.18)' : 'var(--surface-2)',
+                  border: `1px solid ${isListening ? 'rgba(240,107,107,0.5)' : 'var(--line)'}`,
+                  cursor: speechSupported ? 'pointer' : 'not-allowed',
+                  opacity: speechSupported ? 1 : 0.45,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {isListening
+                  ? <Square size={14} color="var(--urgent)" strokeWidth={2.2} />
+                  : <Mic size={15} color="var(--dim)" strokeWidth={2} />}
+              </button>
+              <button
                 onClick={() => sendMessage(inputValue)}
                 style={{
                   width: 38,
@@ -447,6 +1135,7 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                 <Send size={15} color={inputValue.trim() ? '#0e0e1a' : 'var(--faint)'} strokeWidth={2} />
               </button>
             </div>
+          </div>
           </div>
         </div>
       </div>

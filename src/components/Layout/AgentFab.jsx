@@ -1,4 +1,4 @@
-import { Sparkles } from 'lucide-react'
+import Logo from '../Logo'
 
 export default function AgentFab({ onToggle }) {
   return (
@@ -17,21 +17,21 @@ export default function AgentFab({ onToggle }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        boxShadow: '0 8px 24px rgba(139,135,255,0.4)',
+        boxShadow: '0 5px 14px rgba(94,135,245,0.24)',
         transition: 'transform 0.18s ease, box-shadow 0.18s ease',
         zIndex: 50,
       }}
       onMouseEnter={e => {
         e.currentTarget.style.transform = 'scale(1.06)'
-        e.currentTarget.style.boxShadow = '0 12px 32px rgba(139,135,255,0.55)'
+        e.currentTarget.style.boxShadow = '0 8px 19px rgba(94,135,245,0.32)'
       }}
       onMouseLeave={e => {
         e.currentTarget.style.transform = 'scale(1)'
-        e.currentTarget.style.boxShadow = '0 8px 24px rgba(139,135,255,0.4)'
+        e.currentTarget.style.boxShadow = '0 5px 14px rgba(94,135,245,0.24)'
       }}
-      aria-label="Open AI tutor"
+      aria-label="Open Task Copilot"
     >
-      <Sparkles size={22} color="white" strokeWidth={1.8} />
+      <Logo variant="mark" size={32} />
     </button>
   )
 }

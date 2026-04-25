@@ -6,18 +6,19 @@ export default function ChatMessage({ role, text, action, preview, onAdd, onEdit
 
   if (isUser) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '5px 16px' }}>
         <div
           style={{
             background: 'var(--accent)',
-            color: '#0e0e1a',
-            borderRadius: '14px 14px 4px 14px',
-            padding: '10px 14px',
-            maxWidth: '78%',
-            fontSize: 13.5,
+            color: '#ffffff',
+            borderRadius: '12px 12px 4px 12px',
+            padding: '9px 12px',
+            maxWidth: '80%',
+            fontSize: 13,
             fontFamily: 'Inter, sans-serif',
-            fontWeight: 450,
-            lineHeight: 1.55,
+            fontWeight: 500,
+            lineHeight: 1.5,
+            boxShadow: '0 1px 0 rgba(0,0,0,0.04)',
           }}
         >
           {text}
@@ -34,19 +35,18 @@ export default function ChatMessage({ role, text, action, preview, onAdd, onEdit
     : text
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-start', padding: '4px 16px' }}>
+    <div style={{ display: 'flex', justifyContent: 'flex-start', padding: '5px 16px' }}>
       <div style={{ maxWidth: '86%', display: 'flex', flexDirection: 'column' }}>
         <div
           style={{
             background: 'var(--surface-2)',
             border: '1px solid var(--line)',
-            borderRadius: '14px 14px 14px 4px',
-            padding: '10px 14px',
-            fontSize: 14,
-            fontFamily: 'Fraunces, serif',
-            fontStyle: 'italic',
-            fontWeight: 350,
-            lineHeight: 1.65,
+            borderRadius: '12px 12px 12px 4px',
+            padding: '10px 12px',
+            fontSize: 13.5,
+            fontFamily: 'Inter, sans-serif',
+            fontWeight: 430,
+            lineHeight: 1.58,
             color: 'var(--text)',
           }}
         >

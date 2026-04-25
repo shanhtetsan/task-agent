@@ -2,16 +2,13 @@ import { useState, useEffect } from 'react'
 import { X, ChevronDown, ChevronUp } from 'lucide-react'
 
 const CATEGORY_TYPES = {
-  academic: ['Exam', 'HW', 'Lab', 'Reading'],
-  meeting: ['Meeting'],
-  study: ['Study'],
-  personal: ['Other'],
+  coursework: ['HW', 'Lab', 'Exam', 'Reading', 'Project'],
+  event: ['Meeting', 'Office hours', 'Class', 'Other'],
+  personal: ['Study', 'Errand', 'Other'],
 }
 
-const CATEGORIES = ['academic', 'meeting', 'study', 'personal']
-const CATEGORY_LABELS = { academic: 'Academic', meeting: 'Meeting', study: 'Study', personal: 'Personal' }
-
-const COURSE_SUGGESTIONS = ['CSC 211', 'PHY 215', 'Discrete Math', 'ENG 201']
+const CATEGORIES = ['coursework', 'event', 'personal']
+const CATEGORY_LABELS = { coursework: 'Coursework', event: 'Event', personal: 'Personal' }
 
 const inputStyle = {
   width: '100%',
@@ -29,39 +26,43 @@ const inputStyle = {
 
 export default function TaskModal({ open, onClose, onAdd, initialData }) {
   const [name, setName] = useState('')
-  const [category, setCategory] = useState('academic')
+  const [category, setCategory] = useState('coursework')
   const [type, setType] = useState('HW')
   const [course, setCourse] = useState('')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
   const [location, setLocation] = useState('')
   const [link, setLink] = useState('')
+  const [email, setEmail] = useState('')
   const [notes, setNotes] = useState('')
   const [showMore, setShowMore] = useState(false)
 
   useEffect(() => {
     if (!open) {
       setName('')
-      setCategory('academic')
+      setCategory('coursework')
       setType('HW')
       setCourse('')
       setDate('')
       setTime('')
       setLocation('')
       setLink('')
+      setEmail('')
       setNotes('')
       setShowMore(false)
     } else if (initialData) {
       setName(initialData.name || '')
-      setCategory(initialData.category || 'academic')
-      setType(initialData.type || CATEGORY_TYPES[initialData.category || 'academic'][0])
+      const initialCategory = initialData.category || 'coursework'
+      setCategory(initialCategory)
+      setType(initialData.type || CATEGORY_TYPES[initialCategory]?.[0] || 'HW')
       setCourse(initialData.course || '')
       setDate(initialData.date || '')
       setTime(initialData.time || '')
       setLocation(initialData.location || '')
       setLink(initialData.link || '')
+      setEmail(initialData.email || '')
       setNotes(initialData.notes || '')
-      setShowMore(!!(initialData.location || initialData.link || initialData.notes))
+      setShowMore(!!(initialData.location || initialData.link || initialData.email || initialData.notes))
     }
   }, [open, initialData])
 
@@ -86,11 +87,12 @@ export default function TaskModal({ open, onClose, onAdd, initialData }) {
       name: name.trim(),
       category,
       type,
-      course: category === 'academic' ? (course.trim() || null) : null,
+      course: category === 'coursework' ? (course.trim() || null) : null,
       date,
       time: time || null,
       location: location.trim() || null,
       link: link.trim() || null,
+      email: email.trim() || null,
       notes: notes.trim() || null,
       completed: initialData?.completed ?? false,
       completedAt: initialData?.completedAt ?? null,
@@ -128,7 +130,7 @@ export default function TaskModal({ open, onClose, onAdd, initialData }) {
           display: 'flex',
           flexDirection: 'column',
           gap: 20,
-          boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
+          boxShadow: '0 14px 38px rgba(0,0,0,0.32)',
           animation: 'modalIn 0.18s ease',
         }}
       >
@@ -197,8 +199,8 @@ export default function TaskModal({ open, onClose, onAdd, initialData }) {
                   onClick={() => setCategory(cat)}
                   style={{
                     flex: 1,
-                    background: category === cat ? 'rgba(139,135,255,0.15)' : 'var(--surface-2)',
-                    border: category === cat ? '1px solid rgba(139,135,255,0.4)' : '1px solid var(--line-2)',
+                    background: category === cat ? 'var(--accent-soft)' : 'var(--surface-2)',
+                    border: category === cat ? '1px solid rgba(94,135,245,0.35)' : '1px solid var(--line-2)',
                     borderRadius: 7,
                     padding: '7px 0',
                     fontSize: 11.5,
@@ -225,8 +227,8 @@ export default function TaskModal({ open, onClose, onAdd, initialData }) {
                     onClick={() => setType(t)}
                     style={{
                       flex: 1,
-                      background: type === t ? 'rgba(139,135,255,0.15)' : 'var(--surface-2)',
-                      border: type === t ? '1px solid rgba(139,135,255,0.4)' : '1px solid var(--line-2)',
+                      background: type === t ? 'var(--accent-soft)' : 'var(--surface-2)',
+                      border: type === t ? '1px solid rgba(94,135,245,0.35)' : '1px solid var(--line-2)',
                       borderRadius: 7,
                       padding: '7px 0',
                       fontSize: 12,
@@ -243,22 +245,18 @@ export default function TaskModal({ open, onClose, onAdd, initialData }) {
             </Field>
           )}
 
-          {/* Course — academic only */}
-          {category === 'academic' && (
+          {/* Course — coursework only */}
+          {category === 'coursework' && (
             <Field label="Course">
               <input
                 type="text"
                 placeholder="e.g. PHY 215"
-                list="course-suggestions"
                 value={course}
                 onChange={e => setCourse(e.target.value)}
                 style={inputStyle}
                 onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
                 onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
               />
-              <datalist id="course-suggestions">
-                {COURSE_SUGGESTIONS.map(c => <option key={c} value={c} />)}
-              </datalist>
             </Field>
           )}
 
@@ -333,6 +331,17 @@ export default function TaskModal({ open, onClose, onAdd, initialData }) {
                   placeholder="https://zoom.us/j/..."
                   value={link}
                   onChange={e => setLink(e.target.value)}
+                  style={inputStyle}
+                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                  onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
+                />
+              </Field>
+              <Field label="Email (opt.)">
+                <input
+                  type="email"
+                  placeholder="professor@cuny.edu"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
                   style={inputStyle}
                   onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
                   onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
