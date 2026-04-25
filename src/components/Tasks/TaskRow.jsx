@@ -73,7 +73,7 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
   const [hovered, setHovered] = useState(false)
   const { category, type, name, date, time, course, location, link, email, completed } = task
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.personal
-  const isZoom = /zoom/i.test(location || '') || /zoom/i.test(link || '')
+  const isZoom = /zoom/i.test(location || '') || /zoom/i.test(link || '') || category === 'event'
   const zoomHref = isZoom ? (link || 'https://zoom.us/') : null
   const showJoin = hovered && isZoom && !!link && isNextThirtyMinutes(task)
   const calendarLink = date ? buildCalendarLink(task) : null
@@ -93,7 +93,7 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
               {formatTimeOnly(time)}
             </span>
           ) : null}
-          {location ? (
+          {(zoomHref || location) ? (
             zoomHref ? (
               <a
                 href={zoomHref}
