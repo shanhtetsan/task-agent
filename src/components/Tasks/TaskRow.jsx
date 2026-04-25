@@ -126,7 +126,9 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
       style={{
         display: 'flex',
         alignItems: 'center',
+        flexWrap: 'wrap',
         gap: 8,
+        position: 'relative',
         minHeight: 52,
         padding: '8px 12px',
         borderBottom: '1px solid #232323',
@@ -160,7 +162,15 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
         {completed ? <Check size={11} color="#fff" /> : null}
       </button>
 
-      <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div
+        style={{
+          minWidth: 0,
+          flex: '1 1 280px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
         {category === 'coursework' && course ? (
           <span
             style={{
@@ -199,6 +209,7 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
         <span
           style={{
             minWidth: 0,
+            flex: 1,
             fontFamily: 'Inter, sans-serif',
             fontSize: 14,
             fontWeight: 500,
@@ -207,6 +218,7 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
             lineHeight: 1.3,
             whiteSpace: 'normal',
             wordBreak: 'break-word',
+            overflowWrap: 'anywhere',
           }}
         >
           {name}
@@ -215,14 +227,21 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
 
       <div
         style={{
-          width: 84,
+          position: 'absolute',
+          top: 8,
+          right: 12,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'flex-end',
           gap: 4,
+          padding: 2,
+          borderRadius: 8,
+          background: 'rgba(32,32,32,0.92)',
+          border: '1px solid var(--line)',
           opacity: hovered ? 1 : 0,
           pointerEvents: hovered ? 'auto' : 'none',
           transition: 'opacity 150ms ease',
+          zIndex: 1,
         }}
       >
         <ActionIcon onClick={() => onToggleTask?.(task.id)} title={completed ? 'Undo' : 'Done'}>
@@ -244,6 +263,7 @@ export default function TaskRow({ task, onToggleTask, onEditTask, onDeleteTask }
           justifyContent: 'flex-end',
           gap: 8,
           flexShrink: 0,
+          marginLeft: 'auto',
         }}
       >
         {completed ? (
