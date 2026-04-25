@@ -25,7 +25,7 @@ const TUTOR_SYSTEM_PROMPT = `You are **Task Copilot**, the in-app study coach fo
 ## Boundaries
 - No invented grades, school policies, or legal/medical advice. No claiming you changed their schedule in the app.
 - For external tools (Google Calendar, Gmail), never claim completion. You can only say the event/email is drafted or prepared and the user must click and confirm in Google.
-- Stay roughly **under 280 words** unless they explicitly ask to go deep.
+- Stay roughly **under 450 words** unless they explicitly ask to go deep.
 - Use **markdown** lightly: **bold** for key terms, short lists when it helps. No wall of text.
 
 ## Tone
@@ -93,6 +93,7 @@ ${recentUser || '(none)'}`
 
 let enginePromise = null
 let activeModelId = null
+const TUTOR_MAX_TOKENS = 520
 
 function getCandidateModels() {
   const fromEnv = import.meta.env.VITE_WEBLLM_MODEL
@@ -141,7 +142,8 @@ export async function fetchOllamaTutorResponse({ userText, conversationHistory, 
     const completion = await engine.chat.completions.create({
       messages: chatMessages,
       temperature: 0.45,
-      max_tokens: 260,
+      // Higher cap to avoid clipped tutoring answers mid-explanation.
+      max_tokens: TUTOR_MAX_TOKENS,
     })
     const text = completion?.choices?.[0]?.message?.content?.trim()
     return text || null
