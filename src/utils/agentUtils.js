@@ -19,6 +19,14 @@ export function classifyIntent(text) {
     return 'schedule_query'
   }
 
+  // Plan-to-tasks conversion follow-up
+  if (
+    /\b(add|convert|turn)\b.{0,24}\b(all|that|this)\b.{0,24}\b(plan\b|\bstudy\s+plan\b).{0,24}\b(task|tasks)\b/i.test(t) ||
+    /\badd\s+all\b.{0,24}\b(plan|days?)\b.{0,24}\b(tasks?)\b/i.test(t)
+  ) {
+    return 'planning'
+  }
+
   // 2. Explicit add
   if (/\b(add|remind\s+me(\s+to)?|schedule|create\s+(a\s+)?task|new\s+task)\b/i.test(t)) {
     return 'explicit_add'
@@ -278,6 +286,19 @@ function extractDayCountForPlan(text) {
   return 3
 }
 
+function inferRecentPlanDayCount(conversationHistory) {
+  for (let i = conversationHistory.length - 1; i >= 0; i--) {
+    const m = conversationHistory[i]
+    if (m?.role !== 'assistant' || !m.text) continue
+    const hit = m.text.match(/\b(\d{1,2})\s*-\s*day\s+plan\b|\b(\d{1,2})\s+day\s+plan\b/i)
+    if (hit) {
+      const n = Number(hit[1] || hit[2])
+      if (n >= 2 && n <= 14) return n
+    }
+  }
+  return null
+}
+
 function extractPlanTime(text) {
   const t = (text || '').toLowerCase()
   if (/\bnoon\b/.test(t)) return '12:00'
@@ -351,7 +372,11 @@ export function generateResponse(intent, text, tasks, conversationHistory) {
 
     case 'planning': {
       const today = getTodayISO()
-      const dayCount = extractDayCountForPlan(text)
+      const explicitDayCount = extractDayCountForPlan(text)
+      const genericPlanAddRequest = /\b(add|convert|turn)\b.{0,24}\b(all|that|this)\b.{0,24}\b(plan|study\s+plan)\b.{0,24}\b(task|tasks)\b/i.test(text.toLowerCase())
+      const dayCount = genericPlanAddRequest
+        ? (inferRecentPlanDayCount(conversationHistory) || explicitDayCount)
+        : explicitDayCount
       const parsedTime = extractPlanTime(text)
       const courseMatch = text.match(/\b([A-Z]{2,4}\s?\d{3}[A-Z]?)\b/i)
       let courseName = courseMatch ? courseMatch[0].toUpperCase() : null
@@ -360,7 +385,9 @@ export function generateResponse(intent, text, tasks, conversationHistory) {
           if (text.toLowerCase().includes(c.toLowerCase())) { courseName = c; break }
         }
       }
-      const label = courseName || 'your topic'
+      const contextTopic = findContextTopic(conversationHistory, text)
+      const normalizedTopic = normalizeTopicPhrase(contextTopic || '')
+      const label = courseName || (normalizedTopic ? toTitleCase(normalizedTopic) : 'your topic')
       const startDate = parseRelativeDate(text) || today
       const stageNames = ['Review fundamentals', 'Practice key problems', 'Mixed drills + recap', 'Timed practice', 'Light review + confidence pass']
       const studyTasks = Array.from({ length: dayCount }, (_, i) => {
