@@ -1,14 +1,22 @@
-import { computeGroup, formatDate } from '../../utils/dateUtils'
+import { computeGroup, formatDate, getTodayISO } from '../../utils/dateUtils'
 import Logo from '../Logo'
 import { useNavigate } from 'react-router-dom'
+
+function formatTodayHeader() {
+  const [y, m, d] = getTodayISO().split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+}
 
 export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
   const navigate = useNavigate()
   const todayTasks = tasks.filter(t => computeGroup(t.date) === 'today')
   const focusTask = todayTasks.find(t => !t.completed)
-  const alsoToday = todayTasks.filter(t => t !== focusTask)
+  const alsoToday = focusTask ? todayTasks.filter(t => t.id !== focusTask.id) : []
+  const todayDoneOnly = !focusTask && todayTasks.length > 0 ? todayTasks : []
   const weekendTasks = tasks.filter(t => computeGroup(t.date) === 'weekend').slice(0, 2)
   const activeCount = todayTasks.filter(t => !t.completed).length
+  const oneThingToday = activeCount === 1 && !!focusTask
 
   if (todayTasks.length === 0) {
     return (
@@ -115,7 +123,7 @@ export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
           textTransform: 'uppercase',
         }}
       >
-        Friday, April 24
+        {formatTodayHeader()}
       </div>
 
       {/* H1 */}
@@ -130,14 +138,26 @@ export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
           marginBottom: 40,
         }}
       >
-        Good morning. You have {activeCount}{' '}
-        {activeCount === 1 ? 'thing' : 'things'} that{' '}
-        <em style={{ fontStyle: 'italic' }}>matter</em> today.
+        {activeCount === 0 && todayTasks.length > 0 ? (
+          <>
+            You&apos;re all set — <em style={{ fontStyle: 'italic' }}>nothing</em> left that needs you today.
+          </>
+        ) : oneThingToday ? (
+          <>
+            <em style={{ fontStyle: 'italic' }}>This</em> is the thing that matters today.
+          </>
+        ) : (
+          <>
+            Good morning. You have {activeCount}{' '}
+            {activeCount === 1 ? 'thing' : 'things'} that{' '}
+            <em style={{ fontStyle: 'italic' }}>{activeCount === 1 ? 'matters' : 'matter'}</em> today.
+          </>
+        )}
       </h1>
 
-      {/* Focus section */}
+      {/* Focus section — single open task = what matters; several = first focus + “also” */}
       {focusTask && (
-        <Section label="Focus">
+        <Section label={oneThingToday ? 'What matters today' : 'Focus'}>
           <div
             onClick={() => navigate('/tasks')}
             style={{
@@ -208,13 +228,32 @@ export default function TodayPage({ tasks = [], onNewTask, onOpenAgent }) {
                 lineHeight: 1.55,
               }}
             >
-              "Due at 6 PM. Don't leave it for tonight."
+              {oneThingToday
+              ? "Give it your best attention when you're ready."
+              : "Due at 6 PM. Don't leave it for tonight."}
             </div>
           </div>
         </Section>
       )}
 
-      {/* Also today section */}
+      {/* Also today / done-only list */}
+      {todayDoneOnly.length > 0 && (
+        <Section label="Today">
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--line)',
+              borderRadius: 10,
+              overflow: 'hidden',
+            }}
+          >
+            {todayDoneOnly.map((task, i) => (
+              <SimpleRow key={task.id} task={task} isLast={i === todayDoneOnly.length - 1} onClick={() => navigate('/tasks')} />
+            ))}
+          </div>
+        </Section>
+      )}
+
       {alsoToday.length > 0 && (
         <Section label="Also today">
           <div

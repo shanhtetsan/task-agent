@@ -228,6 +228,34 @@ export default function AgentPanel({
     return buildGmailLink({ to: task.email, subject, body })
   }
 
+  const ZOOM_LINK_FOLLOWUP_TEXT = 'Want to save the Zoom link too? Paste the Zoom URL.'
+
+  function buildGmailDraftAssistantMessage(withEmail) {
+    return {
+      role: 'assistant',
+      text: "Here's the draft. Click Open Gmail to review and send.",
+      action: {
+        type: 'open-link',
+        title: 'Gmail Draft',
+        body: `Draft a confirmation for "${withEmail.name}"`,
+        btn: 'Open Gmail',
+        href: buildTaskGmailLink(withEmail),
+      },
+    }
+  }
+
+  /** Gmail draft, then auto Zoom ask in the same turn if we still need a link (no extra user message). */
+  function afterEmailSavedAppendMessages(p, withEmail) {
+    p.pendingUserBeatAfterEmail = false
+    const out = [buildGmailDraftAssistantMessage(withEmail)]
+    if (p.zoom) {
+      p.zoomPromptSent = true
+      out.push({ role: 'assistant', text: ZOOM_LINK_FOLLOWUP_TEXT })
+    }
+    if (!p.date && !p.email && !p.zoom) pendingFollowUpsRef.current = null
+    return out
+  }
+
   function extractEmail(text) {
     const match = (text || '').match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)
     return match ? match[0] : null
@@ -286,7 +314,7 @@ export default function AgentPanel({
     }
   }
 
-  /** One follow-up at a time. Next prompts wait for a user message after calendar / after email when needed. */
+  /** One follow-up at a time on confirm. After calendar or Gmail, Zoom is asked in the same turn as the draft (no extra keystroke). */
   function pushNextFollowUpForLinkedTask() {
     const t = resolveAgentFollowUpTask()
     const p = pendingFollowUpsRef.current
@@ -363,37 +391,6 @@ export default function AgentPanel({
           const fromStore = tasks.find(t => t.id === id)
           const target = { ...targetForFollowUp, ...(fromStore || {}) }
 
-          if (p.pendingUserBeatAfterEmail) {
-            p.pendingUserBeatAfterEmail = false
-            if (p.zoom && providedUrl && isZoomUrl(providedUrl)) {
-              onUpdateTask?.(id, { link: providedUrl })
-              const merged = { ...target, link: providedUrl }
-              lastAgentFollowUpTaskRef.current = merged
-              p.zoom = false
-              if (!p.date && !p.email) pendingFollowUpsRef.current = null
-              setConversation([...nextConv, {
-                role: 'assistant',
-                text: `Saved the Zoom link for "${merged.name}".`,
-              }])
-              return
-            }
-            if (p.zoom && !p.zoomPromptSent) {
-              p.zoomPromptSent = true
-              setConversation([...nextConv, {
-                role: 'assistant',
-                text: 'Want to save the Zoom link too? Paste the Zoom URL.',
-              }])
-              return
-            }
-            if (p.zoom && p.zoomPromptSent && !providedUrl) {
-              setConversation([...nextConv, {
-                role: 'assistant',
-                text: 'Please paste a Zoom link (https://zoom.us/...).',
-              }])
-              return
-            }
-          }
-
           if (p.pendingUserBeatAfterCalendar) {
             p.pendingUserBeatAfterCalendar = false
             if (p.email && providedEmail) {
@@ -401,19 +398,7 @@ export default function AgentPanel({
               const withEmail = { ...target, email: providedEmail }
               lastAgentFollowUpTaskRef.current = withEmail
               p.email = false
-              p.pendingUserBeatAfterEmail = !!p.zoom
-              if (!p.date && !p.email && !p.zoom) pendingFollowUpsRef.current = null
-              setConversation([...nextConv, {
-                role: 'assistant',
-                text: "Here's the draft. Click Open Gmail to review and send.",
-                action: {
-                  type: 'open-link',
-                  title: 'Gmail Draft',
-                  body: `Draft a confirmation for "${withEmail.name}"`,
-                  btn: 'Open Gmail',
-                  href: buildTaskGmailLink(withEmail),
-                },
-              }])
+              setConversation([...nextConv, ...afterEmailSavedAppendMessages(p, withEmail)])
               return
             }
             if (p.email && !providedEmail && providedUrl && isZoomUrl(providedUrl)) {
@@ -488,19 +473,7 @@ export default function AgentPanel({
             const withEmail = { ...target, email: providedEmail }
             lastAgentFollowUpTaskRef.current = withEmail
             p.email = false
-            p.pendingUserBeatAfterEmail = !!p.zoom
-            if (!p.date && !p.email && !p.zoom) pendingFollowUpsRef.current = null
-            setConversation([...nextConv, {
-              role: 'assistant',
-              text: "Here's the draft. Click Open Gmail to review and send.",
-              action: {
-                type: 'open-link',
-                title: 'Gmail Draft',
-                body: `Draft a confirmation for "${withEmail.name}"`,
-                btn: 'Open Gmail',
-                href: buildTaskGmailLink(withEmail),
-              },
-            }])
+            setConversation([...nextConv, ...afterEmailSavedAppendMessages(p, withEmail)])
             return
           }
           if (p.zoom && providedUrl && isZoomUrl(providedUrl)) {
@@ -531,18 +504,14 @@ export default function AgentPanel({
           }
           const withEmail = { ...target, email: providedEmail }
           onUpdateTask?.(target.id, { email: providedEmail })
-          const response = {
-            role: 'assistant',
-            text: "Here's the draft. Click Open Gmail to review and send.",
-            action: {
-              type: 'open-link',
-              title: 'Gmail Draft',
-              body: `Draft a confirmation for "${withEmail.name}"`,
-              btn: 'Open Gmail',
-              href: buildTaskGmailLink(withEmail),
-            },
+          const p0 = pendingFollowUpsRef.current
+          const isLinked = p0 && lastAgentFollowUpTaskIdRef.current === target.id
+          if (isLinked) {
+            p0.email = false
+            setConversation([...nextConv, ...afterEmailSavedAppendMessages(p0, withEmail)])
+          } else {
+            setConversation([...nextConv, buildGmailDraftAssistantMessage(withEmail)])
           }
-          setConversation([...nextConv, response])
           return
         }
 
