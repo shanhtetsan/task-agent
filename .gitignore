@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local judging notes
+JUDGES_QA_NOTE.md
