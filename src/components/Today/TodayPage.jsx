@@ -1,10 +1,11 @@
 import { Sparkles } from 'lucide-react'
+import { computeGroup, formatDate } from '../../utils/dateUtils'
 
 export default function TodayPage({ tasks = [], onNewTask }) {
-  const todayTasks = tasks.filter(t => t.group === 'today')
-  const focusTask = todayTasks.find(t => t.urgent && !t.completed)
-  const alsoToday = todayTasks.filter(t => !t.urgent)
-  const weekendTasks = tasks.filter(t => t.group === 'weekend').slice(0, 2)
+  const todayTasks = tasks.filter(t => computeGroup(t.date) === 'today')
+  const focusTask = todayTasks.find(t => !t.completed)
+  const alsoToday = todayTasks.filter(t => t !== focusTask)
+  const weekendTasks = tasks.filter(t => computeGroup(t.date) === 'weekend').slice(0, 2)
   const activeCount = todayTasks.filter(t => !t.completed).length
 
   if (todayTasks.length === 0) {
@@ -146,7 +147,7 @@ export default function TodayPage({ tasks = [], onNewTask }) {
                   textTransform: 'uppercase',
                 }}
               >
-                {focusTask.course}
+                {focusTask.course || focusTask.category}
               </span>
               <span
                 style={{
@@ -159,7 +160,7 @@ export default function TodayPage({ tasks = [], onNewTask }) {
                   letterSpacing: '0.4px',
                 }}
               >
-                {focusTask.due}
+                {formatDate(focusTask.date, focusTask.time)}
               </span>
             </div>
             <div
@@ -271,20 +272,22 @@ function SimpleRow({ task, isLast }) {
             flexShrink: 0,
           }}
         />
-        <span
-          style={{
-            fontFamily: '"JetBrains Mono", monospace',
-            fontSize: 10.5,
-            color: 'var(--dim)',
-            background: 'var(--surface-2)',
-            border: '1px solid var(--line)',
-            borderRadius: 5,
-            padding: '2px 7px',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {task.course}
-        </span>
+        {(task.course || task.category) && (
+          <span
+            style={{
+              fontFamily: '"JetBrains Mono", monospace',
+              fontSize: 10.5,
+              color: 'var(--dim)',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--line)',
+              borderRadius: 5,
+              padding: '2px 7px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {task.course || task.category}
+          </span>
+        )}
         <span style={{ fontSize: 13.5, color: 'var(--text)' }}>{task.name}</span>
       </div>
       <span
@@ -296,7 +299,7 @@ function SimpleRow({ task, isLast }) {
           flexShrink: 0,
         }}
       >
-        {task.due}
+        {formatDate(task.date, task.time)}
       </span>
     </div>
   )

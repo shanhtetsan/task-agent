@@ -1,6 +1,7 @@
 import ActionCard from './ActionCard'
+import PreviewCard from './PreviewCard'
 
-export default function ChatMessage({ role, text, action, onAdd }) {
+export default function ChatMessage({ role, text, action, preview, onAdd, onEdit, onCancel }) {
   const isUser = role === 'user'
 
   if (isUser) {
@@ -25,6 +26,13 @@ export default function ChatMessage({ role, text, action, onAdd }) {
     )
   }
 
+  const formattedText = typeof text === 'string'
+    ? text.split('\n').map((line, i) => {
+        const bold = line.replace(/\*\*(.*?)\*\*/g, (_, m) => `<strong>${m}</strong>`)
+        return <div key={i} style={{ minHeight: line === '' ? '0.6em' : undefined }} dangerouslySetInnerHTML={{ __html: bold || '&nbsp;' }} />
+      })
+    : text
+
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-start', padding: '4px 16px' }}>
       <div style={{ maxWidth: '86%', display: 'flex', flexDirection: 'column' }}>
@@ -42,9 +50,17 @@ export default function ChatMessage({ role, text, action, onAdd }) {
             color: 'var(--text)',
           }}
         >
-          {text}
+          {formattedText}
         </div>
         {action && <ActionCard action={action} onAdd={onAdd} />}
+        {preview && (
+          <PreviewCard
+            preview={preview}
+            onAdd={onAdd}
+            onEdit={onEdit}
+            onCancel={onCancel}
+          />
+        )}
       </div>
     </div>
   )

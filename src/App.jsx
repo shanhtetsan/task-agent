@@ -6,6 +6,7 @@ import AgentPanel from './components/Layout/AgentPanel'
 import TodayPage from './components/Today/TodayPage'
 import TasksPage from './components/Tasks/TasksPage'
 import TaskModal from './components/Tasks/TaskModal'
+import { migrateTasks } from './utils/migrationUtils'
 
 function Toast({ message }) {
   if (!message) return null
@@ -42,14 +43,21 @@ function Toast({ message }) {
 
 export default function App() {
   const [tasks, setTasks] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('planner_tasks') || '[]') }
-    catch { return [] }
+    try {
+      const raw = JSON.parse(localStorage.getItem('planner_tasks') || '[]')
+      const migrated = migrateTasks(raw)
+      if (migrated.some((t, i) => t !== raw[i])) {
+        localStorage.setItem('planner_tasks', JSON.stringify(migrated))
+      }
+      return migrated
+    } catch { return [] }
   })
   const [conversation, setConversation] = useState(() => {
     try { return JSON.parse(localStorage.getItem('planner_conversation') || '[]') }
     catch { return [] }
   })
   const [taskModalOpen, setTaskModalOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState(null)
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentMode, setAgentMode] = useState('sidebar')
   const [toast, setToast] = useState(null)
@@ -65,8 +73,13 @@ export default function App() {
   function addTasks(newTasks) {
     setTasks(prev => [
       ...prev,
-      ...newTasks.map((t, i) => ({ ...t, id: Date.now() + i, completed: false })),
+      ...newTasks.map(t => ({ ...t, id: t.id || crypto.randomUUID() })),
     ])
+  }
+
+  function handleEditTask(prefilled) {
+    setEditingTask(prefilled)
+    setTaskModalOpen(true)
   }
 
   function showToast(msg) {
@@ -125,6 +138,7 @@ export default function App() {
             setConversation={setConversation}
             tasks={tasks}
             onAddTasks={addTasks}
+            onEditTask={handleEditTask}
             showToast={showToast}
           />
         )}
@@ -134,8 +148,9 @@ export default function App() {
 
       <TaskModal
         open={taskModalOpen}
-        onClose={() => setTaskModalOpen(false)}
+        onClose={() => { setTaskModalOpen(false); setEditingTask(null) }}
         onAdd={handleNewTask}
+        initialData={editingTask}
       />
 
       <Toast message={toast} />

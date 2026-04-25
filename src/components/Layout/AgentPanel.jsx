@@ -2,60 +2,12 @@ import { useRef, useEffect, useState } from 'react'
 import { X, Maximize2, Minimize2, Send } from 'lucide-react'
 import ChatMessage from '../Agent/ChatMessage'
 import QuickReplies from '../Agent/QuickReplies'
+import { classifyIntent, generateResponse } from '../../utils/agentUtils'
 
-const EMPTY_CHIPS = ['Help me plan this week', 'Quiz me on a topic', 'Add a task']
-const NORMAL_CHIPS = ['Show me a worked example', "I'm stuck", 'Quiz me']
+const EMPTY_CHIPS = ['What do I have today?', 'Help me plan my week', 'Quiz me on a topic']
+const NORMAL_CHIPS = ['What do I have today?', "I'm stuck", 'Quiz me']
 
-function getScriptedResponse(text, tasks) {
-  const t = text.toLowerCase()
-
-  if (/midterm|exam|prepare|study/.test(t)) {
-    return {
-      role: 'assistant',
-      text: "You have 4 days. I see the induction reading isn't done yet — that's the topic most likely on Prof. Yu's midterm. Let's start there. Prove by induction: for all n ≥ 1, 1 + 2 + 3 + ... + n = n(n+1)/2. Start with the base case.",
-      action: {
-        type: 'add-tasks',
-        title: 'I can add this to your schedule',
-        body: 'Block Saturday 2–4pm for Chapter 6 reading and Sunday for practice problems?',
-        btn: 'Add to Tasks',
-        tasks: [
-          { course: 'Discrete Math', type: 'Reading', name: 'Chapter 6 — Induction and recursion', due: 'Saturday 2pm', group: 'weekend' },
-          { course: 'Discrete Math', type: 'Reading', name: 'Chapter 6 — practice problems', due: 'Sunday 2pm', group: 'weekend' },
-        ],
-      },
-    }
-  }
-
-  if (/\badd\b|new task/.test(t)) {
-    return {
-      role: 'assistant',
-      text: "Sure, I can add a task. What's the name, course, and when is it due?",
-    }
-  }
-
-  if (/quiz/.test(t)) {
-    return {
-      role: 'assistant',
-      text: "Let's try one. Prove by induction: for all n ≥ 1, 1 + 2 + 3 + ... + n = n(n+1)/2. Start with the base case — what's the smallest n we check, and what do we need to show?",
-    }
-  }
-
-  if (/plan|week/.test(t)) {
-    const urgentTask = tasks.find(task => task.urgent && !task.completed)
-    const ref = urgentTask ? `"${urgentTask.name}"` : 'your most urgent item'
-    return {
-      role: 'assistant',
-      text: `Let me look at your tasks... based on what I see, I'd recommend focusing on ${ref} first. Want me to build a study plan around it?`,
-    }
-  }
-
-  return {
-    role: 'assistant',
-    text: "That's a good question. Can you tell me more about what you're working on?",
-  }
-}
-
-export default function AgentPanel({ mode, onModeChange, onClose, conversation, setConversation, tasks, onAddTasks, showToast }) {
+export default function AgentPanel({ mode, onModeChange, onClose, conversation, setConversation, tasks, onAddTasks, onEditTask, showToast }) {
   const messagesRef = useRef(null)
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
@@ -78,7 +30,9 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
     setIsTyping(true)
 
     setTimeout(() => {
-      const response = getScriptedResponse(trimmed, tasks)
+      const intent = classifyIntent(trimmed, nextConv)
+      const { text: respText, preview, action } = generateResponse(intent, trimmed, tasks, nextConv)
+      const response = { role: 'assistant', text: respText, ...(preview ? { preview } : {}), ...(action ? { action } : {}) }
       const withResponse = [...nextConv, response]
       setConversation(withResponse)
       localStorage.setItem('planner_conversation', JSON.stringify(withResponse))
@@ -90,9 +44,33 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
     const msg = conversation[msgIndex]
     if (!msg?.action?.tasks) return
     onAddTasks(msg.action.tasks)
-    showToast('Task added')
+    showToast(`${msg.action.tasks.length} task${msg.action.tasks.length > 1 ? 's' : ''} added`)
     const updated = conversation.map((m, i) =>
       i === msgIndex ? { ...m, action: { ...m.action, added: true } } : m
+    )
+    setConversation(updated)
+    localStorage.setItem('planner_conversation', JSON.stringify(updated))
+  }
+
+  function handleAddPreview(msgIndex) {
+    const msg = conversation[msgIndex]
+    if (!msg?.preview) return
+    onAddTasks([msg.preview])
+    showToast('Task added')
+    const updated = conversation.map((m, i) =>
+      i === msgIndex ? { ...m, preview: { ...m.preview, added: true } } : m
+    )
+    setConversation(updated)
+    localStorage.setItem('planner_conversation', JSON.stringify(updated))
+  }
+
+  function handleEditPreview(task) {
+    onEditTask?.(task)
+  }
+
+  function handleCancelPreview(msgIndex) {
+    const updated = conversation.map((m, i) =>
+      i === msgIndex ? { ...m, preview: null } : m
     )
     setConversation(updated)
     localStorage.setItem('planner_conversation', JSON.stringify(updated))
@@ -374,7 +352,13 @@ export default function AgentPanel({ mode, onModeChange, onClose, conversation, 
                 <ChatMessage
                   key={i}
                   {...msg}
-                  onAdd={msg.action ? () => handleAddFromAction(i) : undefined}
+                  onAdd={
+                    msg.action ? () => handleAddFromAction(i) :
+                    msg.preview ? () => handleAddPreview(i) :
+                    undefined
+                  }
+                  onEdit={msg.preview ? (task) => handleEditPreview(task) : undefined}
+                  onCancel={msg.preview ? () => handleCancelPreview(i) : undefined}
                 />
               ))}
               {isTyping && (

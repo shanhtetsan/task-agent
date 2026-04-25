@@ -1,8 +1,9 @@
 import { Sparkles } from 'lucide-react'
 import TaskGroup from './TaskGroup'
+import { computeGroup } from '../../utils/dateUtils'
 
 const groups = [
-  { key: 'today', label: 'Today · Friday' },
+  { key: 'today', label: 'Today' },
   { key: 'weekend', label: 'This weekend' },
   { key: 'next-week', label: 'Next week' },
 ]
@@ -201,7 +202,7 @@ export default function TasksPage({ tasks = [], onNewTask, onOpenAgent }) {
 
       {/* Task groups */}
       {groups.map(({ key, label }) => {
-        const groupTasks = tasks.filter(t => t.group === key)
+        const groupTasks = tasks.filter(t => computeGroup(t.date) === key)
         if (groupTasks.length === 0) return null
         return <TaskGroup key={key} label={label} tasks={groupTasks} />
       })}

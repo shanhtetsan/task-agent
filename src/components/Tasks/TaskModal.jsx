@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react'
-import { X } from 'lucide-react'
+import { X, ChevronDown, ChevronUp } from 'lucide-react'
+
+const CATEGORY_TYPES = {
+  academic: ['Exam', 'HW', 'Lab', 'Reading'],
+  meeting: ['Meeting'],
+  study: ['Study'],
+  personal: ['Other'],
+}
+
+const CATEGORIES = ['academic', 'meeting', 'study', 'personal']
+const CATEGORY_LABELS = { academic: 'Academic', meeting: 'Meeting', study: 'Study', personal: 'Personal' }
 
 const COURSE_SUGGESTIONS = ['CSC 211', 'PHY 215', 'Discrete Math', 'ENG 201']
-const TYPES = ['HW', 'Lab', 'Reading', 'Exam']
-
-function inferGroup(due) {
-  const d = due.toLowerCase()
-  if (d.includes('today') || d.includes('tonight')) return 'today'
-  if (d.includes('sat') || d.includes('sun')) return 'weekend'
-  return 'next-week'
-}
 
 const inputStyle = {
   width: '100%',
@@ -22,27 +24,54 @@ const inputStyle = {
   fontFamily: 'Inter, sans-serif',
   outline: 'none',
   transition: 'border-color 0.15s',
+  boxSizing: 'border-box',
 }
 
-export default function TaskModal({ open, onClose, onAdd }) {
+export default function TaskModal({ open, onClose, onAdd, initialData }) {
   const [name, setName] = useState('')
-  const [course, setCourse] = useState('')
+  const [category, setCategory] = useState('academic')
   const [type, setType] = useState('HW')
-  const [due, setDue] = useState('')
+  const [course, setCourse] = useState('')
+  const [date, setDate] = useState('')
+  const [time, setTime] = useState('')
+  const [location, setLocation] = useState('')
+  const [link, setLink] = useState('')
+  const [notes, setNotes] = useState('')
+  const [showMore, setShowMore] = useState(false)
 
   useEffect(() => {
     if (!open) {
       setName('')
-      setCourse('')
+      setCategory('academic')
       setType('HW')
-      setDue('')
+      setCourse('')
+      setDate('')
+      setTime('')
+      setLocation('')
+      setLink('')
+      setNotes('')
+      setShowMore(false)
+    } else if (initialData) {
+      setName(initialData.name || '')
+      setCategory(initialData.category || 'academic')
+      setType(initialData.type || CATEGORY_TYPES[initialData.category || 'academic'][0])
+      setCourse(initialData.course || '')
+      setDate(initialData.date || '')
+      setTime(initialData.time || '')
+      setLocation(initialData.location || '')
+      setLink(initialData.link || '')
+      setNotes(initialData.notes || '')
+      setShowMore(!!(initialData.location || initialData.link || initialData.notes))
     }
-  }, [open])
+  }, [open, initialData])
 
   useEffect(() => {
-    function onKey(e) {
-      if (e.key === 'Escape') onClose()
-    }
+    const validTypes = CATEGORY_TYPES[category]
+    if (!validTypes.includes(type)) setType(validTypes[0])
+  }, [category])
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose() }
     if (open) window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
@@ -51,17 +80,27 @@ export default function TaskModal({ open, onClose, onAdd }) {
 
   function handleSubmit(e) {
     e.preventDefault()
-    if (!name.trim()) return
+    if (!name.trim() || !date) return
     onAdd({
-      course: course.trim() || 'General',
-      type,
+      id: initialData?.id || crypto.randomUUID(),
       name: name.trim(),
-      due: due.trim() || 'TBD',
-      group: inferGroup(due),
-      urgent: false,
+      category,
+      type,
+      course: category === 'academic' ? (course.trim() || null) : null,
+      date,
+      time: time || null,
+      location: location.trim() || null,
+      link: link.trim() || null,
+      notes: notes.trim() || null,
+      completed: initialData?.completed ?? false,
+      completedAt: initialData?.completedAt ?? null,
+      source: initialData?.source ?? 'manual',
     })
     onClose()
   }
+
+  const types = CATEGORY_TYPES[category]
+  const isEditing = !!initialData?.id
 
   return (
     <div
@@ -82,7 +121,9 @@ export default function TaskModal({ open, onClose, onAdd }) {
           background: 'var(--surface)',
           border: '1px solid var(--line)',
           borderRadius: 14,
-          width: 420,
+          width: 440,
+          maxHeight: '90vh',
+          overflowY: 'auto',
           padding: '28px 28px 24px',
           display: 'flex',
           flexDirection: 'column',
@@ -109,7 +150,7 @@ export default function TaskModal({ open, onClose, onAdd }) {
               letterSpacing: '-0.2px',
             }}
           >
-            New task
+            {isEditing ? 'Edit task' : 'New task'}
           </span>
           <button
             onClick={onClose}
@@ -137,7 +178,7 @@ export default function TaskModal({ open, onClose, onAdd }) {
             <input
               autoFocus
               type="text"
-              placeholder="e.g. Problem set 3 — kinematics"
+              placeholder="e.g. Physics lab 11"
               value={name}
               onChange={e => setName(e.target.value)}
               style={inputStyle}
@@ -146,62 +187,170 @@ export default function TaskModal({ open, onClose, onAdd }) {
             />
           </Field>
 
-          {/* Course */}
-          <Field label="Course">
-            <input
-              type="text"
-              placeholder="e.g. CSC 211"
-              list="course-suggestions"
-              value={course}
-              onChange={e => setCourse(e.target.value)}
-              style={inputStyle}
-              onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-              onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
-            />
-            <datalist id="course-suggestions">
-              {COURSE_SUGGESTIONS.map(c => <option key={c} value={c} />)}
-            </datalist>
-          </Field>
-
-          {/* Type */}
-          <Field label="Type">
-            <div style={{ display: 'flex', gap: 8 }}>
-              {TYPES.map(t => (
+          {/* Category */}
+          <Field label="Category">
+            <div style={{ display: 'flex', gap: 6 }}>
+              {CATEGORIES.map(cat => (
                 <button
-                  key={t}
+                  key={cat}
                   type="button"
-                  onClick={() => setType(t)}
+                  onClick={() => setCategory(cat)}
                   style={{
                     flex: 1,
-                    background: type === t ? 'rgba(139,135,255,0.15)' : 'var(--surface-2)',
-                    border: type === t ? '1px solid rgba(139,135,255,0.4)' : '1px solid var(--line-2)',
+                    background: category === cat ? 'rgba(139,135,255,0.15)' : 'var(--surface-2)',
+                    border: category === cat ? '1px solid rgba(139,135,255,0.4)' : '1px solid var(--line-2)',
                     borderRadius: 7,
                     padding: '7px 0',
-                    fontSize: 12,
-                    color: type === t ? 'var(--accent)' : 'var(--dim)',
+                    fontSize: 11.5,
+                    color: category === cat ? 'var(--accent)' : 'var(--dim)',
                     cursor: 'pointer',
                     fontFamily: '"JetBrains Mono", monospace',
                     transition: 'all 0.15s',
                   }}
                 >
-                  {t}
+                  {CATEGORY_LABELS[cat]}
                 </button>
               ))}
             </div>
           </Field>
 
-          {/* Due date */}
-          <Field label="Due date">
-            <input
-              type="text"
-              placeholder="e.g. Tuesday 2pm, Saturday, today"
-              value={due}
-              onChange={e => setDue(e.target.value)}
-              style={inputStyle}
-              onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-              onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
-            />
-          </Field>
+          {/* Type — only show when there are multiple options */}
+          {types.length > 1 && (
+            <Field label="Type">
+              <div style={{ display: 'flex', gap: 8 }}>
+                {types.map(t => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setType(t)}
+                    style={{
+                      flex: 1,
+                      background: type === t ? 'rgba(139,135,255,0.15)' : 'var(--surface-2)',
+                      border: type === t ? '1px solid rgba(139,135,255,0.4)' : '1px solid var(--line-2)',
+                      borderRadius: 7,
+                      padding: '7px 0',
+                      fontSize: 12,
+                      color: type === t ? 'var(--accent)' : 'var(--dim)',
+                      cursor: 'pointer',
+                      fontFamily: '"JetBrains Mono", monospace',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          )}
+
+          {/* Course — academic only */}
+          {category === 'academic' && (
+            <Field label="Course">
+              <input
+                type="text"
+                placeholder="e.g. PHY 215"
+                list="course-suggestions"
+                value={course}
+                onChange={e => setCourse(e.target.value)}
+                style={inputStyle}
+                onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
+              />
+              <datalist id="course-suggestions">
+                {COURSE_SUGGESTIONS.map(c => <option key={c} value={c} />)}
+              </datalist>
+            </Field>
+          )}
+
+          {/* Date + Time row */}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Field label="Date" style={{ flex: 1 }}>
+              <input
+                type="date"
+                value={date}
+                onChange={e => setDate(e.target.value)}
+                required
+                style={{ ...inputStyle, colorScheme: 'dark' }}
+                onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
+              />
+            </Field>
+            <Field label="Time (opt.)" style={{ flex: 1 }}>
+              <input
+                type="time"
+                value={time}
+                onChange={e => setTime(e.target.value)}
+                style={{ ...inputStyle, colorScheme: 'dark' }}
+                onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
+              />
+            </Field>
+          </div>
+
+          {/* More options toggle */}
+          <button
+            type="button"
+            onClick={() => setShowMore(v => !v)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--dim)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontFamily: '"JetBrains Mono", monospace',
+              fontSize: 10.5,
+              letterSpacing: '0.3px',
+              padding: '2px 0',
+              textTransform: 'uppercase',
+              transition: 'color 0.15s',
+              alignSelf: 'flex-start',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'var(--dim)')}
+          >
+            {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            {showMore ? 'Fewer options' : 'More options'}
+          </button>
+
+          {showMore && (
+            <>
+              <Field label="Location (opt.)">
+                <input
+                  type="text"
+                  placeholder="e.g. Room 402, Zoom, Prof's office"
+                  value={location}
+                  onChange={e => setLocation(e.target.value)}
+                  style={inputStyle}
+                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                  onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
+                />
+              </Field>
+              <Field label="Link (opt.)">
+                <input
+                  type="url"
+                  placeholder="https://zoom.us/j/..."
+                  value={link}
+                  onChange={e => setLink(e.target.value)}
+                  style={inputStyle}
+                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                  onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
+                />
+              </Field>
+              <Field label="Notes (opt.)">
+                <textarea
+                  placeholder="Any additional context..."
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  rows={3}
+                  style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
+                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                  onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
+                />
+              </Field>
+            </>
+          )}
 
           {/* Buttons */}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
@@ -233,19 +382,19 @@ export default function TaskModal({ open, onClose, onAdd }) {
             <button
               type="submit"
               style={{
-                background: name.trim() ? 'var(--accent)' : 'var(--surface-2)',
-                color: name.trim() ? '#0e0e1a' : 'var(--faint)',
+                background: (name.trim() && date) ? 'var(--accent)' : 'var(--surface-2)',
+                color: (name.trim() && date) ? '#0e0e1a' : 'var(--faint)',
                 border: 'none',
                 borderRadius: 8,
                 padding: '8px 20px',
                 fontSize: 13,
                 fontWeight: 600,
-                cursor: name.trim() ? 'pointer' : 'default',
+                cursor: (name.trim() && date) ? 'pointer' : 'default',
                 fontFamily: 'Inter, sans-serif',
                 transition: 'all 0.15s',
               }}
             >
-              Add task
+              {isEditing ? 'Save task' : 'Add task'}
             </button>
           </div>
         </form>
@@ -254,9 +403,9 @@ export default function TaskModal({ open, onClose, onAdd }) {
   )
 }
 
-function Field({ label, children }) {
+function Field({ label, children, style }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, ...style }}>
       <label
         style={{
           fontFamily: '"JetBrains Mono", monospace',
