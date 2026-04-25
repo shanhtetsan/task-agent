@@ -84,6 +84,11 @@ export default function AgentPanel({
   const [historyOpen, setHistoryOpen] = useState(false)
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const [hoveredConversationId, setHoveredConversationId] = useState(null)
+  /** Task just added/confirmed in chat — used so follow-up replies attach to the right task (not a heuristic "latest" row). */
+  const lastAgentFollowUpTaskIdRef = useRef(null)
+  const lastAgentFollowUpTaskRef = useRef(null)
+  /** What we still need for that task (multiple can be open). */
+  const pendingFollowUpsRef = useRef(null)
 
   useEffect(() => {
     if (messagesRef.current) {
@@ -228,10 +233,47 @@ export default function AgentPanel({
     return match ? match[0] : null
   }
 
+  function extractUrl(text) {
+    const match = (text || '').match(/https?:\/\/[^\s]+/i)
+    return match ? match[0] : null
+  }
+
+  function isZoomUrl(url) {
+    return /https?:\/\/([a-z0-9-]+\.)?zoom\.us\//i.test(url || '')
+  }
+
   function findEmailTargetTask() {
     const withEmail = [...tasks].reverse().find(t => t?.email)
     if (withEmail) return withEmail
     return [...tasks].reverse().find(t => t?.category === 'event') || tasks[tasks.length - 1] || null
+  }
+
+  function resolveAgentFollowUpTask() {
+    const id = lastAgentFollowUpTaskIdRef.current
+    if (!id) return null
+    return tasks.find(t => t.id === id) || lastAgentFollowUpTaskRef.current
+  }
+
+  function setAgentFollowUpContext(task) {
+    if (!task?.id) return
+    lastAgentFollowUpTaskIdRef.current = task.id
+    lastAgentFollowUpTaskRef.current = { ...task }
+  }
+
+  function initPendingFollowUpsForTask(task) {
+    if (!task?.id) {
+      pendingFollowUpsRef.current = null
+      return
+    }
+    const wantsDate = !task.date
+    const wantsEmail = task.category === 'event' && !task.email
+    const wantsZoom =
+      task.category === 'event' && /\bzoom\b/i.test(task.location || '') && !task.link
+    if (!wantsDate && !wantsEmail && !wantsZoom) {
+      pendingFollowUpsRef.current = null
+      return
+    }
+    pendingFollowUpsRef.current = { date: wantsDate, email: wantsEmail, zoom: wantsZoom }
   }
 
   function pushAssistantAction(text, action) {
@@ -262,12 +304,76 @@ export default function AgentPanel({
 
     void (async () => {
       try {
+        const p = pendingFollowUpsRef.current
+        const targetForFollowUp = p ? resolveAgentFollowUpTask() : null
+        const providedEmail = extractEmail(trimmed)
+        const providedUrl = extractUrl(trimmed)
+        const parsedDate = parseRelativeDate(trimmed)
+        const parsedTime = parseTimeFromText(trimmed)
+
+        if (p && targetForFollowUp?.id) {
+          // Resolve explicit task from last confirm (matches preview / plan add), not a heuristic "latest" row.
+          const id = targetForFollowUp.id
+          const fromStore = tasks.find(t => t.id === id)
+          const target = { ...targetForFollowUp, ...(fromStore || {}) }
+
+          if (p.zoom && providedUrl && isZoomUrl(providedUrl)) {
+            onUpdateTask?.(id, { link: providedUrl })
+            const merged = { ...target, link: providedUrl }
+            lastAgentFollowUpTaskRef.current = merged
+            p.zoom = false
+            if (!p.date && !p.email) pendingFollowUpsRef.current = null
+            setConversation([...nextConv, {
+              role: 'assistant',
+              text: `Saved the Zoom link for "${merged.name}".`,
+            }])
+            return
+          }
+          if (p.email && providedEmail) {
+            onUpdateTask?.(id, { email: providedEmail })
+            const withEmail = { ...target, email: providedEmail }
+            lastAgentFollowUpTaskRef.current = withEmail
+            p.email = false
+            if (!p.date && !p.zoom) pendingFollowUpsRef.current = null
+            setConversation([...nextConv, {
+              role: 'assistant',
+              text: "Here's the draft. Click Open Gmail to review and send.",
+              action: {
+                type: 'open-link',
+                title: 'Gmail Draft',
+                body: `Draft a confirmation for "${withEmail.name}"`,
+                btn: 'Open Gmail',
+                href: buildTaskGmailLink(withEmail),
+              },
+            }])
+            return
+          }
+          if (p.date && parsedDate) {
+            onUpdateTask?.(id, { date: parsedDate, ...(parsedTime ? { time: parsedTime } : {}) })
+            const updatedTask = { ...target, date: parsedDate, ...(parsedTime ? { time: parsedTime } : {}) }
+            lastAgentFollowUpTaskRef.current = updatedTask
+            p.date = false
+            if (!p.email && !p.zoom) pendingFollowUpsRef.current = null
+            setConversation([...nextConv, {
+              role: 'assistant',
+              text: "Perfect — I updated the date. Here's the Google Calendar link:",
+              action: {
+                type: 'open-link',
+                title: 'Google Calendar',
+                body: `Add "${updatedTask.name}" to Google Calendar.`,
+                btn: 'Open Google Calendar',
+                href: buildCalendarLink(updatedTask),
+              },
+            }])
+            return
+          }
+        }
+
         const lastAssistantText = [...conversation]
           .reverse()
           .find(m => m?.role === 'assistant' && typeof m.text === 'string')
           ?.text || ''
         const awaitingRecipient = /recipient'?s email|what'?s the recipient'?s email/i.test(lastAssistantText)
-        const providedEmail = extractEmail(trimmed)
         if (awaitingRecipient && providedEmail) {
           const target = findEmailTargetTask()
           if (!target) {
@@ -282,7 +388,7 @@ export default function AgentPanel({
             text: "Here's the draft. Click Open Gmail to review and send.",
             action: {
               type: 'open-link',
-              title: 'GMAIL DRAFT',
+              title: 'Gmail Draft',
               body: `Draft a confirmation for "${withEmail.name}"`,
               btn: 'Open Gmail',
               href: buildTaskGmailLink(withEmail),
@@ -321,7 +427,7 @@ export default function AgentPanel({
             if (!target) {
               respText = "I couldn't find a matching task to email about yet."
             } else if (!target.email) {
-              respText = "I can draft it, but I need the recipient email first. Add it in task edit."
+              respText = "I can draft it. What's the recipient's email?"
             } else {
               const response = {
                 role: 'assistant',
@@ -425,6 +531,8 @@ export default function AgentPanel({
     )
     setConversation(updated)
     const firstTask = msg.action.tasks[0]
+    setAgentFollowUpContext(firstTask)
+    initPendingFollowUpsForTask(firstTask)
     if (firstTask?.date) {
       pushAssistantAction('Want me to add this to your Google Calendar?', {
         type: 'open-link',
@@ -433,6 +541,8 @@ export default function AgentPanel({
         btn: 'Open Google Calendar',
         href: buildCalendarLink(firstTask),
       })
+    } else {
+      pushAssistantAction('Want me to create the Google Calendar event too? Tell me the date (and time if you have it).')
     }
     if (firstTask?.category === 'event') {
       if (firstTask?.email) {
@@ -446,6 +556,9 @@ export default function AgentPanel({
       } else {
         pushAssistantAction("Email a confirmation? What's the recipient's email?")
       }
+      if (/\bzoom\b/i.test(firstTask?.location || '') && !firstTask?.link) {
+        pushAssistantAction('Want to save the Zoom link too? Paste the Zoom URL.')
+      }
     }
   }
 
@@ -458,6 +571,8 @@ export default function AgentPanel({
       i === msgIndex ? { ...m, preview: { ...m.preview, added: true } } : m
     )
     setConversation(updated)
+    setAgentFollowUpContext(msg.preview)
+    initPendingFollowUpsForTask(msg.preview)
     if (msg.preview?.date) {
       pushAssistantAction('Want me to add this to your Google Calendar?', {
         type: 'open-link',
@@ -466,6 +581,8 @@ export default function AgentPanel({
         btn: 'Open Google Calendar',
         href: buildCalendarLink(msg.preview),
       })
+    } else {
+      pushAssistantAction('Want me to create the Google Calendar event too? Tell me the date (and time if you have it).')
     }
     if (msg.preview?.category === 'event') {
       if (msg.preview?.email) {
@@ -478,6 +595,9 @@ export default function AgentPanel({
         })
       } else {
         pushAssistantAction("Email a confirmation? What's the recipient's email?")
+      }
+      if (/\bzoom\b/i.test(msg.preview?.location || '') && !msg.preview?.link) {
+        pushAssistantAction('Want to save the Zoom link too? Paste the Zoom URL.')
       }
     }
   }
